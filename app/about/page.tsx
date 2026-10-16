@@ -29,10 +29,20 @@ export default function AboutPage() {
       ],
     },
     {
-      category: "Conversion & Archive",
+      category: "Conversion & Processing",
       items: [
         { name: "HTML5 Canvas API", role: "Mesin pemrosesan dan konversi gambar sisi klien" },
-        { name: "JSZip", role: "Pemaketan berkas hasil konversi ke arsip ZIP" },
+        { name: "Web Audio API + lamejs", role: "Decode dan encode audio ke MP3 langsung di browser" },
+        { name: "pdf-lib", role: "Generasi dan penggabungan PDF dari teks dan gambar" },
+        { name: "mammoth + DOMPurify", role: "Parser dokumen Word (.docx) ke HTML tersanitasi" },
+        { name: "JSZip", role: "Pemaketan berkas hasil konversi batch ke arsip ZIP" },
+      ],
+    },
+    {
+      category: "Media & Server",
+      items: [
+        { name: "@coflyn/scrapr", role: "Resolusi metadata dan tautan unduhan dari URL media publik" },
+        { name: "SSRF Guard (dns.lookup)", role: "Proteksi server dari DNS rebinding dan akses jaringan internal" },
       ],
     },
     {
@@ -94,10 +104,13 @@ export default function AboutPage() {
             </h2>
           </div>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            Fokus utama TokiConvert saat ini adalah konversi gambar langsung di sisi peramban (<span className="italic font-medium text-[#332F29]">client-side processing</span>). Gambar yang Anda pilih diproses secara lokal menggunakan kemampuan HTML5 Canvas API, sehingga berkas asli Anda tidak pernah dikirim, diunggah, atau disimpan di server mana pun.
+            TokiConvert adalah utilitas konversi berkas yang berjalan sepenuhnya di peramban (<span className="italic font-medium text-[#332F29]">client-side</span>) untuk semua pemrosesan lokal — gambar, audio, dan dokumen — tanpa mengunggah berkas ke server mana pun.
           </p>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            Format gambar yang saat ini terverifikasi didukung meliputi <span className="font-medium text-[#332F29]">PNG, JPEG/JPG, WEBP, BMP, SVG,</span> dan <span className="font-medium text-[#332F29]">GIF</span>, lengkap dengan opsi pengaturan dimensi serta slider kualitas kompresi.
+            <span className="font-medium text-[#332F29]">Image Converter</span> mendukung PNG, JPEG, WEBP, BMP, SVG, dan GIF dengan opsi dimensi dan kualitas. <span className="font-medium text-[#332F29]">Audio Converter</span> mendekode audio via Web Audio API dan mengenkode ke MP3 menggunakan lamejs — tanpa WASM. <span className="font-medium text-[#332F29]">Document Converter</span> menghasilkan PDF dari teks atau gambar, dan mengurai DOCX ke HTML tersanitasi.
+          </p>
+          <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
+            <span className="font-medium text-[#332F29]">Media Downloader</span> me-resolve metadata dan tautan unduhan dari URL media publik di berbagai platform, diproses di sisi server dengan proteksi SSRF aktif.
           </p>
         </section>
 
@@ -232,26 +245,50 @@ export default function AboutPage() {
               </div>
             </div>
 
-            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#FFFCF6] rounded p-3">
-              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#F4EBDD] text-[#62584C] border border-[#D8CCB9] shrink-0">
-                Rencana
+            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded p-3">
+              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#344638] text-[#FFFCF6] shrink-0">
+                Tersedia
               </span>
               <div>
-                <span className="font-medium text-[#332F29]">Audio &amp; Document Converter</span>
+                <span className="font-semibold text-[#332F29]">Audio Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  — Rencana eksplorasi konversi audio dan dokumen berbasis WebAssembly.
+                  (WAV, MP3, OGG) berbasis Web Audio API dan FFmpeg WebAssembly.
                 </span>
               </div>
             </div>
 
-            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#FFFCF6] rounded p-3">
-              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#F4EBDD] text-[#62584C] border border-[#D8CCB9] shrink-0">
-                Rencana
+            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded p-3">
+              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#344638] text-[#FFFCF6] shrink-0">
+                Tersedia
               </span>
               <div>
-                <span className="font-medium text-[#332F29]">Video &amp; Media URL Tools</span>
+                <span className="font-semibold text-[#332F29]">Document Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  — Rencana pengolahan video ringan dan ekstraksi media via tautan URL.
+                  (TXT ke PDF, Gambar ke PDF, DOCX ke HTML tersanitasi) di sisi browser.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded p-3">
+              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#344638] text-[#FFFCF6] shrink-0">
+                Tersedia
+              </span>
+              <div>
+                <span className="font-semibold text-[#332F29]">Media Downloader</span>
+                <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
+                  — Resolve metadata dan tautan unduhan dari URL media publik (TikTok, Instagram, SoundCloud, dll.) dengan pilihan format MP3 atau MP4. Diproses server-side dengan SSRF guard.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#F4EBDD]/20 rounded p-3 opacity-70">
+              <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#62584C]/20 text-[#62584C] shrink-0">
+                Direncanakan
+              </span>
+              <div>
+                <span className="font-semibold text-[#332F29]">Video Converter</span>
+                <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
+                  — Konversi format video lokal (MP4, WEBM, dll.) menggunakan FFmpeg WebAssembly. Terkendala kompatibilitas COOP/COEP header di deployment saat ini.
                 </span>
               </div>
             </div>

@@ -11,6 +11,8 @@ export default function Navbar() {
 
   const navLinks = [
     { name: "Image Converter", href: "/" },
+    { name: "Audio Converter", href: "/audio" },
+    { name: "Document Converter", href: "/document" },
     { name: "Media Tools", href: "/media" },
     { name: "About", href: "/about" },
   ];

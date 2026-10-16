@@ -15,6 +15,8 @@ import {
   ChevronDown,
   Layers,
 } from "lucide-react";
+import RetroProgressBar from "./RetroProgressBar";
+import PixelLoader from "./PixelLoader";
 
 export type QueueStatus = "queued" | "processing" | "success" | "failed";
 export type ConversionPresetType = "web-optimized" | "high-quality" | "small-file" | "custom";
@@ -1332,6 +1334,16 @@ export default function ConverterWorkspace({
 
           {/* 6. Primary Convert Action Button */}
           <div className="pt-2 mt-auto">
+            {isConverting && (
+              <div className="mb-2.5 w-full">
+                <RetroProgressBar
+                  value={Math.round(((queue.length - queuedCount) / (queue.length || 1)) * 100)}
+                  totalBlocks={16}
+                  variant="terracotta"
+                  label={`PROSES BATCH (${queue.length - queuedCount}/${queue.length})`}
+                />
+              </div>
+            )}
             <button
               type="button"
               onClick={triggerConvertAll}
@@ -1340,7 +1352,7 @@ export default function ConverterWorkspace({
             >
               {isConverting ? (
                 <>
-                  <RotateCcw size={16} className="animate-spin" aria-hidden="true" />
+                  <PixelLoader size={16} color="#FFFFFF" />
                   <span>
                     Memproses ({queue.length - queuedCount} / {queue.length})...
                   </span>
