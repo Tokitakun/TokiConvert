@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+@theme {
+  --color-warm-ivory: #F7F4EE;
+  --color-warm-surface: #FFFEFB;
+  --color-warm-border: #D8D0C4;
+  --color-warm-terracotta: #A9573F;
+}
