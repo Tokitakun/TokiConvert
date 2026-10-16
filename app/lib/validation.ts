@@ -20,15 +20,36 @@ export const MAX_FILES = 10;
 export const MAX_SIZE = 15 * 1024 * 1024;
 
 /**
+ * Allowed file extensions as fallback when file.type is empty or ambiguous.
+ */
+export const ALLOWED_EXTENSIONS = [
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".gif",
+  ".svg",
+  ".bmp",
+];
+
+/**
  * Validate a single File object.
  * Returns null if valid, otherwise an error message string.
  */
 export function validateFile(file: File): string | null {
-  if (!ALLOWED_MIME.includes(file.type)) {
-    return "Format tidak didukung";
+  if (file.size === 0) {
+    return "Berkas kosong (0 byte) tidak dapat diproses";
+  }
+
+  const hasAllowedMime = ALLOWED_MIME.includes(file.type);
+  const fileNameLower = file.name.toLowerCase();
+  const hasAllowedExt = ALLOWED_EXTENSIONS.some((ext) => fileNameLower.endsWith(ext));
+
+  if (!hasAllowedMime && !hasAllowedExt) {
+    return "Format berkas tidak didukung (hanya PNG, JPG, WEBP, BMP, SVG, GIF)";
   }
   if (file.size > MAX_SIZE) {
-    return "Ukuran file melebihi 15 MB";
+    return "Ukuran berkas melebihi 15 MB";
   }
   return null;
 }

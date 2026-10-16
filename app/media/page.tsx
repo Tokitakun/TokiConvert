@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 
@@ -11,9 +11,15 @@ interface Download {
   label?: string;
 }
 
+interface AuthorInfo {
+  name?: string;
+  username?: string;
+  avatar?: string;
+}
+
 interface ResolveResult {
   title?: string;
-  author?: string;
+  author?: string | AuthorInfo;
   thumbnail?: string;
   duration?: string;
   views?: string | number;
@@ -22,12 +28,13 @@ interface ResolveResult {
   destinationUrl?: string;
   originalUrl?: string;
   hops?: string[];
-  downloads?: Download[];
+  downloads?: Download[] | Record<string, Download>;
   url?: string;
 }
 
 interface ApiResponse {
   status: boolean;
+  errorCategory?: "validation" | "dns" | "ssrf" | "timeout" | "upstream" | "no_result";
   platform?: string;
   platformNote?: string;
   result?: ResolveResult;
@@ -158,8 +165,23 @@ export default function MediaPage() {
             {!response.status ? (
               <div className="flex items-start gap-3">
                 <span className="text-xl mt-0.5">⚠️</span>
-                <div>
-                  <p className="font-semibold text-[#332F29] mb-1">Gagal resolve URL</p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold text-[#332F29]">
+                      {response.errorCategory === "validation" && "Format URL Tidak Valid"}
+                      {response.errorCategory === "dns" && "Host Tidak Dapat Dijangkau"}
+                      {response.errorCategory === "ssrf" && "Akses Jaringan Ditolak"}
+                      {response.errorCategory === "timeout" && "Waktu Permintaan Habis"}
+                      {response.errorCategory === "no_result" && "Resolver Tidak Memperoleh Hasil"}
+                      {response.errorCategory === "upstream" && "Layanan Upstream Tidak Tersedia"}
+                      {!response.errorCategory && "Gagal Resolve URL"}
+                    </p>
+                    {response.errorCategory && (
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded border border-[#A34F38]/30 text-[#A34F38] bg-[#A34F38]/10">
+                        {response.errorCategory}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-[#62584C]">{response.message}</p>
                 </div>
               </div>
@@ -187,7 +209,15 @@ export default function MediaPage() {
                     {response.result.author && (
                       <div>
                         <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">Penulis / Kanal</p>
-                        <p className="text-[#332F29]">{response.result.author}</p>
+                        <p className="text-[#332F29]">
+                          {typeof response.result.author === "string"
+                            ? response.result.author
+                            : `${response.result.author.name || ""}${
+                                response.result.author.username
+                                  ? ` (${response.result.author.username.startsWith("@") ? response.result.author.username : `@${response.result.author.username}`})`
+                                  : ""
+                              }`}
+                        </p>
                       </div>
                     )}
                     {response.result.duration && (
@@ -211,41 +241,51 @@ export default function MediaPage() {
                     )}
 
                     {/* Download links */}
-                    {response.result.downloads && response.result.downloads.length > 0 && (
-                      <div>
-                        <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-2">Tautan Tersedia</p>
-                        <div className="grid gap-2">
-                          {response.result.downloads.map((dl, i) => (
-                            <div
-                              key={i}
-                              className="flex items-center justify-between px-3 py-2 rounded border border-[#D8CCB9] bg-[#FFFCF6] text-sm"
-                            >
-                              <div className="flex flex-col">
-                                <span className="font-medium text-[#332F29]">
-                                  {dl.quality ?? dl.type ?? `Tautan ${i + 1}`}
-                                </span>
+                    {(() => {
+                      const downloadsList: Download[] = Array.isArray(response.result.downloads)
+                        ? response.result.downloads
+                        : typeof response.result.downloads === "object" && response.result.downloads !== null
+                        ? Object.values(response.result.downloads)
+                        : [];
+
+                      if (downloadsList.length === 0) return null;
+
+                      return (
+                        <div>
+                          <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-2">Tautan Tersedia</p>
+                          <div className="grid gap-2">
+                            {downloadsList.map((dl, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between px-3 py-2 rounded border border-[#D8CCB9] bg-[#FFFCF6] text-sm"
+                              >
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-[#332F29]">
+                                    {dl.quality ?? dl.type ?? `Tautan ${i + 1}`}
+                                  </span>
+                                  {dl.url && (
+                                    <span className="text-[#62584C] text-xs truncate max-w-[300px]">{dl.url}</span>
+                                  )}
+                                </div>
                                 {dl.url && (
-                                  <span className="text-[#62584C] text-xs truncate max-w-[300px]">{dl.url}</span>
+                                  <a
+                                    href={dl.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="ml-3 text-xs text-[#A34F38] hover:text-[#8B3F2A] underline font-medium whitespace-nowrap"
+                                  >
+                                    Buka tautan
+                                  </a>
                                 )}
                               </div>
-                              {dl.url && (
-                                <a
-                                  href={dl.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="ml-3 text-xs text-[#A34F38] hover:text-[#8B3F2A] underline font-medium whitespace-nowrap"
-                                >
-                                  Buka tautan
-                                </a>
-                              )}
-                            </div>
-                          ))}
+                            ))}
+                          </div>
+                          <p className="text-xs text-[#62584C] mt-2 italic">
+                            TokiConvert hanya menampilkan tautan. Pastikan Anda mematuhi syarat penggunaan platform asal.
+                          </p>
                         </div>
-                        <p className="text-xs text-[#62584C] mt-2 italic">
-                          TokiConvert hanya menampilkan tautan. Pastikan Anda mematuhi syarat penggunaan platform asal.
-                        </p>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Direct URL for unshortener */}
                     {!response.result.downloads && response.result.url && (
