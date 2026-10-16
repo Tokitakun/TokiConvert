@@ -8,6 +8,10 @@ export const ALLOWED_MIME = [
   "image/png",
   "image/jpeg",
   "image/webp",
+  "image/gif",
+  "image/svg+xml",
+  "image/bmp",
+  "image/x-ms-bmp",
 ];
 
 /** Maximum number of files per batch */
