@@ -16,7 +16,7 @@ export const ALLOWED_MIME = [
 
 /** Maximum number of files per batch */
 export const MAX_FILES = 10;
-/** Maximum size per file in bytes (15 MB) */
+/** Maximum size per file in bytes (15 MB) */
 export const MAX_SIZE = 15 * 1024 * 1024;
 
 /**
@@ -46,10 +46,10 @@ export function validateFile(file: File): string | null {
   const hasAllowedExt = ALLOWED_EXTENSIONS.some((ext) => fileNameLower.endsWith(ext));
 
   if (!hasAllowedMime && !hasAllowedExt) {
-    return "Format berkas tidak didukung (hanya PNG, JPG, WEBP, BMP, SVG, GIF)";
+    return "Format file tidak didukung (hanya PNG, JPG, WEBP, BMP, SVG, GIF)";
   }
   if (file.size > MAX_SIZE) {
-    return "Ukuran berkas melebihi 15 MB";
+    return "Ukuran file melebihi batas 15 MB";
   }
   return null;
 }
@@ -76,7 +76,6 @@ export function validateBatch(files: FileList): {
     }
   }
   if (files.length > MAX_FILES) {
-    // Mark excess files as error
     for (let i = MAX_FILES; i < files.length; i++) {
       errors.set(files[i], `Maksimum ${MAX_FILES} file per batch`);
     }

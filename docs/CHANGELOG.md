@@ -1,10 +1,9 @@
 # CHANGELOG.md
 
-- Implementasi UI fondasi: header dengan judul, toggle light/dark, hero singkat, area drag‑and‑drop.
-- Perbaikan `app/page.tsx` untuk layout satu kolom terpusat, warna background mengikuti tema.
-- Tambahkan import """import ThemeToggle""" ke dalam `app/page.tsx` (komponen placeholder).
-- Pertahankan `DragDropArea` yang ada.
-- Tidak ada perubahan logika konversi, tidak ada dependency baru.
+- Modernisasi panel kanan Image Converter: tata letak terstruktur, surface bersih, kartu pemilihan format interaktif, dan tombol aksi utama Convert dengan status lengkap.
+- Implementasi Conversion Presets: Web Optimized (WebP 80%), High Quality (95% / Lossless), Small File (WebP 55%), dan penyesuaian Custom.
+- Bahasa UI alami (campuran Indonesia & Inggris) untuk kenyamanan pengguna dan istilah teknis standar.
+- Menjaga keutuhan identitas Vintage Retro Classic tanpa penambahan sistem i18n atau dependency baru.
 
 - Tambah UI drag‑and‑drop (`DragDropArea.tsx`).
 - Perbarui `AGENTS.md` dengan aturan agen Toki Convert.

@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TokiConvert — Konversi Gambar Sederhana & Privat",
-  description: "Aplikasi konversi gambar berbasis web yang cepat, mudah digunakan, dan memprioritaskan privasi di sisi klien.",
+  title: "TokiConvert — Image Converter & Media Tools",
+  description: "Ubah format gambar dengan cepat dan aman langsung di browser tanpa upload ke server.",
 };
 
 export default function RootLayout({
@@ -35,4 +35,3 @@ export default function RootLayout({
     </html>
   );
 }
-

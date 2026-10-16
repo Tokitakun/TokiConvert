@@ -3,20 +3,21 @@
 import JSZip from "jszip";
 import { useState, useEffect, DragEvent, ChangeEvent, useRef } from "react";
 import {
-  ArrowRightLeft,
   Upload,
   Download,
   Trash2,
-  FileImage,
   Check,
-  ChevronDown,
   Archive,
   RotateCcw,
   AlertCircle,
   Clock,
+  Sliders,
+  ChevronDown,
+  Layers,
 } from "lucide-react";
 
 export type QueueStatus = "queued" | "processing" | "success" | "failed";
+export type ConversionPresetType = "web-optimized" | "high-quality" | "small-file" | "custom";
 
 export interface BatchItem {
   id: string;
@@ -40,39 +41,45 @@ export default function ConverterWorkspace({
 }) {
   const [queue, setQueue] = useState<BatchItem[]>([]);
   const [errorMessages, setErrorMessages] = useState<string[]>([]);
-  const [outputFormat, setOutputFormat] = useState<string>("image/png");
+  const [outputFormat, setOutputFormat] = useState<string>("image/webp");
+  const [preset, setPreset] = useState<ConversionPresetType>("web-optimized");
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isConverting, setIsConverting] = useState<boolean>(false);
   const [isZipping, setIsZipping] = useState<boolean>(false);
   const [status, setStatus] = useState<string>("");
 
-  const [quality, setQuality] = useState<number>(0.92);
+  const [quality, setQuality] = useState<number>(0.8);
   const [targetWidth, setTargetWidth] = useState<number>(0);
   const [targetHeight, setTargetHeight] = useState<number>(0);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLDivElement>(null);
-  const [isFormatOpen, setIsFormatOpen] = useState<boolean>(false);
 
   const supportedFormats = [
-    { mime: "image/png", label: "PNG", supported: true, note: "Lossless" },
-    { mime: "image/jpeg", label: "JPG", supported: true, note: "Kompresi" },
-    { mime: "image/webp", label: "WEBP", supported: true, note: "Efisien" },
-    { mime: "image/bmp", label: "BMP", supported: true, note: "24-bit" },
-    { mime: "image/svg+xml", label: "SVG", supported: true, note: "Raster container" },
-    { mime: "image/gif", label: "GIF", supported: true, note: "Statis (frame 1)" },
+    { mime: "image/webp", label: "WEBP", badge: "Modern Web", desc: "Efisien untuk web" },
+    { mime: "image/jpeg", label: "JPG", badge: "Photo", desc: "Kompresi universal" },
+    { mime: "image/png", label: "PNG", badge: "Lossless", desc: "Kualitas tanpa hilang" },
+    { mime: "image/bmp", label: "BMP", badge: "24-bit Raw", desc: "Format bitmap tanpa kompresi" },
+    { mime: "image/svg+xml", label: "SVG", badge: "Vector Wrapper", desc: "Kontainer raster SVG" },
+    { mime: "image/gif", label: "GIF", badge: "Static 256c", desc: "Frame pertama 256 warna" },
   ];
 
   const mimeToExt = (mime: string): string => {
     switch (mime) {
-      case "image/png": return "png";
-      case "image/jpeg": return "jpg";
-      case "image/webp": return "webp";
-      case "image/bmp": return "bmp";
-      case "image/svg+xml": return "svg";
-      case "image/gif": return "gif";
-      default: return mime.split("/")[1] || "png";
+      case "image/png":
+        return "png";
+      case "image/jpeg":
+        return "jpg";
+      case "image/webp":
+        return "webp";
+      case "image/bmp":
+        return "bmp";
+      case "image/svg+xml":
+        return "svg";
+      case "image/gif":
+        return "gif";
+      default:
+        return mime.split("/")[1] || "png";
     }
   };
 
@@ -99,7 +106,7 @@ export default function ConverterWorkspace({
     const buffer = new ArrayBuffer(fileSize);
     const view = new DataView(buffer);
 
-    view.setUint16(0, 0x424D, false); // "BM"
+    view.setUint16(0, 0x424d, false); // "BM"
     view.setUint32(2, fileSize, true);
     view.setUint16(6, 0, true);
     view.setUint16(8, 0, true);
@@ -124,7 +131,7 @@ export default function ConverterWorkspace({
         const i = (y * width + x) * 4;
         view.setUint8(offset++, data[i + 2]); // B
         view.setUint8(offset++, data[i + 1]); // G
-        view.setUint8(offset++, data[i]);     // R
+        view.setUint8(offset++, data[i]); // R
       }
       for (let p = 0; p < rowSize - width * 3; p++) {
         view.setUint8(offset++, 0);
@@ -186,7 +193,8 @@ export default function ConverterWorkspace({
             const pr = palette[c * 3];
             const pg = palette[c * 3 + 1];
             const pb = palette[c * 3 + 2];
-            const dist = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb);
+            const dist =
+              (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb);
             if (dist < bestDist) {
               bestDist = dist;
               bestIdx = c;
@@ -198,43 +206,39 @@ export default function ConverterWorkspace({
       indexedPixels[p] = idx;
     }
 
-    const colorCount = palette.length / 3;
-    let colorDepth = 1;
-    while (1 << colorDepth < colorCount) colorDepth++;
-    if (colorDepth < 1) colorDepth = 1;
-    const paddedSize = 1 << colorDepth;
-    while (palette.length / 3 < paddedSize) {
-      palette.push(0, 0, 0);
+    while (palette.length < 256 * 3) {
+      palette.push(0);
     }
-
-    const initCodeSize = Math.max(colorDepth, 2);
-    const clearCode = 1 << initCodeSize;
-    const eoiCode = clearCode + 1;
 
     const bytes: number[] = [];
     const writeByte = (b: number) => bytes.push(b & 0xff);
-    const writeWord = (w: number) => bytes.push(w & 0xff, (w >> 8) & 0xff);
-    const writeString = (s: string) => {
-      for (let i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i));
+    const writeWord = (w: number) => {
+      bytes.push(w & 0xff);
+      bytes.push((w >> 8) & 0xff);
     };
 
-    writeString("GIF89a");
+    writeByte(0x47);
+    writeByte(0x49);
+    writeByte(0x46);
+    writeByte(0x38);
+    writeByte(0x39);
+    writeByte(0x61);
+
     writeWord(width);
     writeWord(height);
-    const gctFlag = 0x80;
-    const colorRes = 0x70;
-    const gctSize = (colorDepth - 1) & 0x07;
-    writeByte(gctFlag | colorRes | gctSize);
-    writeByte(hasTransparent ? transparentIndex : 0);
+    writeByte(0xf7);
+    writeByte(0);
     writeByte(0);
 
-    for (let i = 0; i < palette.length; i++) writeByte(palette[i]);
+    for (let i = 0; i < 256 * 3; i++) {
+      writeByte(palette[i]);
+    }
 
     if (hasTransparent) {
       writeByte(0x21);
       writeByte(0xf9);
       writeByte(4);
-      writeByte(0x01);
+      writeByte(1);
       writeWord(0);
       writeByte(transparentIndex);
       writeByte(0);
@@ -247,48 +251,53 @@ export default function ConverterWorkspace({
     writeWord(height);
     writeByte(0);
 
+    const initCodeSize = 8;
     writeByte(initCodeSize);
 
-    let curBit = 0;
-    let curByte = 0;
-    const packet: number[] = [];
+    const clearCode = 1 << initCodeSize;
+    const eoiCode = clearCode + 1;
+    let nextCode = eoiCode + 1;
+    let codeSize = initCodeSize + 1;
+    const maxTableSize = 4096;
 
-    const flushPacket = () => {
-      if (packet.length > 0) {
-        writeByte(packet.length);
-        for (let i = 0; i < packet.length; i++) writeByte(packet[i]);
-        packet.length = 0;
+    let curBits = 0;
+    let curBitsCount = 0;
+    const block: number[] = [];
+
+    const flushBlock = () => {
+      if (block.length > 0) {
+        writeByte(block.length);
+        for (let b = 0; b < block.length; b++) writeByte(block[b]);
+        block.length = 0;
       }
     };
 
-    const writeBits = (val: number, numBits: number) => {
-      curByte |= val << curBit;
-      curBit += numBits;
-      while (curBit >= 8) {
-        packet.push(curByte & 0xff);
-        if (packet.length === 254) flushPacket();
-        curByte >>= 8;
-        curBit -= 8;
+    const writeBits = (code: number, size: number) => {
+      curBits |= code << curBitsCount;
+      curBitsCount += size;
+      while (curBitsCount >= 8) {
+        block.push(curBits & 0xff);
+        if (block.length === 254) flushBlock();
+        curBits >>= 8;
+        curBitsCount -= 8;
       }
     };
 
     const endBits = () => {
-      if (curBit > 0) {
-        packet.push(curByte & 0xff);
-        if (packet.length === 254) flushPacket();
+      if (curBitsCount > 0) {
+        block.push(curBits & 0xff);
+        curBits = 0;
+        curBitsCount = 0;
       }
-      flushPacket();
+      flushBlock();
     };
 
-    let codeSize = initCodeSize + 1;
-    let nextCode = eoiCode + 1;
-    const maxTableSize = 4096;
-    const codeTable = new Map<number, number>();
-
+    let codeTable = new Map<number, number>();
     const resetTable = () => {
-      codeTable.clear();
-      codeSize = initCodeSize + 1;
+      codeTable = new Map<number, number>();
+      for (let i = 0; i < clearCode; i++) codeTable.set(i, i);
       nextCode = eoiCode + 1;
+      codeSize = initCodeSize + 1;
     };
 
     writeBits(clearCode, codeSize);
@@ -344,7 +353,7 @@ export default function ConverterWorkspace({
     compQuality: number
   ): Promise<{ blob: Blob; mime: string; url: string; sizeStr: string }> => {
     if (file.size === 0) {
-      throw new Error("Berkas kosong (0 byte)");
+      throw new Error("Berkas kosong (0 byte) tidak dapat diproses");
     }
 
     const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
@@ -465,28 +474,6 @@ export default function ConverterWorkspace({
     });
   };
 
-  // Click-outside handler for dropdown
-  useEffect(() => {
-    if (isFormatOpen) {
-      const handleClickOutside = (event: MouseEvent) => {
-        if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-          setIsFormatOpen(false);
-        }
-      };
-      const handleEscape = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          setIsFormatOpen(false);
-        }
-      };
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleEscape);
-      return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
-        document.removeEventListener("keydown", handleEscape);
-      };
-    }
-  }, [isFormatOpen]);
-
   // Cleanup object URLs on unmount
   useEffect(() => {
     return () => {
@@ -517,6 +504,72 @@ export default function ConverterWorkspace({
     return nameMap;
   };
 
+  const syncQueueFormat = (newMime: string) => {
+    setQueue((prev) =>
+      prev.map((it) => (it.status === "queued" ? { ...it, targetFormat: newMime } : it))
+    );
+  };
+
+  // Output format selection handler
+  const handleFormatSelect = (mime: string) => {
+    setOutputFormat(mime);
+    syncQueueFormat(mime);
+    // Keep presets aligned with format capabilities
+    if (preset === "web-optimized") {
+      setQuality(0.8);
+    } else if (preset === "high-quality") {
+      setQuality(0.95);
+    } else if (preset === "small-file") {
+      setQuality(0.55);
+    }
+  };
+
+  // Preset selection handler (BAGIAN C)
+  const handlePresetSelect = (newPreset: ConversionPresetType) => {
+    setPreset(newPreset);
+    if (newPreset === "web-optimized") {
+      // Web Optimized favors modern efficient web format
+      if (outputFormat === "image/bmp" || outputFormat === "image/svg+xml") {
+        setOutputFormat("image/webp");
+        syncQueueFormat("image/webp");
+      }
+      setQuality(0.8);
+      setTargetWidth(0);
+      setTargetHeight(0);
+    } else if (newPreset === "high-quality") {
+      // High Quality favors detail fidelity
+      if (outputFormat === "image/jpeg" || outputFormat === "image/webp") {
+        setQuality(0.95);
+      }
+      setTargetWidth(0);
+      setTargetHeight(0);
+    } else if (newPreset === "small-file") {
+      // Small File favors maximum file size reduction
+      if (outputFormat !== "image/webp" && outputFormat !== "image/jpeg") {
+        setOutputFormat("image/webp");
+        syncQueueFormat("image/webp");
+      }
+      setQuality(0.55);
+      setTargetWidth(0);
+      setTargetHeight(0);
+    }
+  };
+
+  const handleQualityChange = (val: number) => {
+    setQuality(val);
+    setPreset("custom");
+  };
+
+  const handleWidthChange = (val: number) => {
+    setTargetWidth(val);
+    setPreset("custom");
+  };
+
+  const handleHeightChange = (val: number) => {
+    setTargetHeight(val);
+    setPreset("custom");
+  };
+
   const addFiles = (fileList: FileList) => {
     const { valid, errors } = onValidate(fileList);
     const newErrs: string[] = [];
@@ -527,7 +580,7 @@ export default function ConverterWorkspace({
 
     const availableSlots = 10 - queue.length;
     if (availableSlots <= 0) {
-      setErrorMessages((prev) => [...prev, "Antrean sudah penuh (maksimal 10 berkas)."]);
+      setErrorMessages((prev) => [...prev, "Antrean sudah penuh (maksimal 10 file)."]);
       return;
     }
 
@@ -535,7 +588,7 @@ export default function ConverterWorkspace({
     if (valid.length > availableSlots) {
       setErrorMessages((prev) => [
         ...prev,
-        `Hanya ${availableSlots} berkas yang ditambahkan karena batas antrean maksimal 10 berkas.`,
+        `Hanya ${availableSlots} file yang ditambahkan karena batas antrean maksimal 10 file.`,
       ]);
     }
 
@@ -559,7 +612,7 @@ export default function ConverterWorkspace({
     });
 
     setQueue((prev) => [...prev, ...newItems]);
-    setStatus(`${filesToAdd.length} berkas ditambahkan ke antrean`);
+    setStatus(`${filesToAdd.length} file ditambahkan ke antrean`);
   };
 
   const onDragEnter = (e: DragEvent<HTMLDivElement>) => {
@@ -618,13 +671,15 @@ export default function ConverterWorkspace({
     });
     setQueue([]);
     setErrorMessages([]);
-    setStatus("Semua berkas dihapus dari antrean");
+    setStatus("Semua file dihapus dari antrean");
   };
 
   // Convert a single item in the queue
   const convertQueueItem = async (item: BatchItem) => {
     setQueue((prev) =>
-      prev.map((it) => (it.id === item.id ? { ...it, status: "processing", errorMessage: undefined } : it))
+      prev.map((it) =>
+        it.id === item.id ? { ...it, status: "processing", errorMessage: undefined } : it
+      )
     );
 
     const fmt = item.targetFormat || outputFormat;
@@ -648,7 +703,7 @@ export default function ConverterWorkspace({
         )
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Gagal mengonversi gambar";
+      const msg = err instanceof Error ? err.message : "Konversi gagal";
       setQueue((prev) =>
         prev.map((it) =>
           it.id === item.id
@@ -667,7 +722,7 @@ export default function ConverterWorkspace({
   const runBatchConversion = async (itemsToProcess: BatchItem[]) => {
     if (itemsToProcess.length === 0 || isConverting) return;
     setIsConverting(true);
-    setStatus(`Mengonversi ${itemsToProcess.length} berkas...`);
+    setStatus(`Memproses konversi ${itemsToProcess.length} file...`);
 
     const concurrency = 2;
     let cursor = 0;
@@ -688,9 +743,11 @@ export default function ConverterWorkspace({
 
   // Convert All pending or failed items
   const triggerConvertAll = async () => {
-    const pendingOrFailed = queue.filter((it) => it.status === "queued" || it.status === "failed");
+    const pendingOrFailed = queue.filter(
+      (it) => it.status === "queued" || it.status === "failed"
+    );
     if (pendingOrFailed.length === 0) {
-      setStatus("Semua berkas dalam antrean sudah selesai dikonversi.");
+      setStatus("Semua file dalam antrean sudah selesai dikonversi.");
       return;
     }
     await runBatchConversion(pendingOrFailed);
@@ -709,7 +766,9 @@ export default function ConverterWorkspace({
     const nameMap = getUniqueOutputFilenames(queue.filter((q) => q.status === "success"));
     const filename =
       nameMap.get(item.id) ||
-      `${item.name.replace(/\.[^/.]+$/, "")}_converted.${mimeToExt(item.convertedMime || item.targetFormat)}`;
+      `${item.name.replace(/\.[^/.]+$/, "")}_converted.${mimeToExt(
+        item.convertedMime || item.targetFormat
+      )}`;
     const a = document.createElement("a");
     a.href = item.convertedUrl;
     a.download = filename;
@@ -722,13 +781,13 @@ export default function ConverterWorkspace({
       (it) => it.status === "success" && (it.convertedBlob || it.convertedUrl)
     );
     if (successfulItems.length === 0) {
-      setStatus("Tidak ada file yang berhasil dikonversi untuk diunduh");
+      setStatus("Tidak ada file yang berhasil dikonversi untuk diunduh.");
       return;
     }
 
     try {
       setIsZipping(true);
-      setStatus("Membuat berkas ZIP...");
+      setStatus("Membuat arsip ZIP...");
       const zip = new JSZip();
       const nameMap = getUniqueOutputFilenames(successfulItems);
 
@@ -749,10 +808,10 @@ export default function ConverterWorkspace({
       a.download = `tokiconvert_batch_${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(zipUrl), 3000);
-      setStatus("ZIP berhasil diunduh");
+      setStatus("Arsip ZIP berhasil diunduh");
     } catch (err) {
       console.error("ZIP creation error:", err);
-      setStatus("Gagal membuat berkas ZIP. Anda tetap dapat mengunduh berkas satu per satu di bawah.");
+      setStatus("Gagal membuat berkas ZIP. Kamu tetap dapat mengunduh berkas satu per satu di bawah.");
     } finally {
       setIsZipping(false);
     }
@@ -765,8 +824,10 @@ export default function ConverterWorkspace({
   const queuedCount = queue.filter((it) => it.status === "queued").length;
   const successfulItems = queue.filter((it) => it.status === "success");
 
+  const supportsQuality = outputFormat === "image/jpeg" || outputFormat === "image/webp";
+
   return (
-    <div className="flex flex-col w-full max-w-5xl mx-auto gap-8 p-6 sm:p-8 bg-[#FFFCF6] rounded-lg border border-[#D8CCB9] shadow-xs">
+    <div className="flex flex-col w-full max-w-5xl mx-auto gap-6 p-4 sm:p-7 bg-[#FFFCF6] rounded-lg border border-[#D8CCB9] shadow-xs">
       {/* Status & Error notifications */}
       {status && (
         <div
@@ -785,7 +846,11 @@ export default function ConverterWorkspace({
       {errorMessages.length > 0 && (
         <div className="p-4 rounded-md border border-[#A34F38]/30 bg-[#A34F38]/5 space-y-1">
           {errorMessages.map((msg, i) => (
-            <p key={i} className="text-xs sm:text-sm text-[#A34F38] flex items-center gap-1.5" role="alert">
+            <p
+              key={i}
+              className="text-xs sm:text-sm text-[#A34F38] flex items-center gap-1.5"
+              role="alert"
+            >
               <span className="font-bold">•</span>
               <span>{msg}</span>
             </p>
@@ -793,14 +858,14 @@ export default function ConverterWorkspace({
         </div>
       )}
 
-      {/* Main conversion workspace */}
+      {/* Main conversion workspace: Left dropzone/queue & Right modern panel */}
       <div className="flex flex-col lg:flex-row gap-6 items-stretch">
-        {/* Source upload & batch queue box */}
-        <div className="flex-1 flex flex-col gap-3">
+        {/* Left Column: Dropzone and Queue */}
+        <div className="flex-1 flex flex-col gap-3 min-w-0">
           <div
             role="button"
             tabIndex={0}
-            aria-label="Area unggah gambar: seret berkas ke sini atau tekan Enter untuk memilih"
+            aria-label="Area upload: drag and drop gambar ke sini atau tekan Enter untuk memilih file"
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -822,13 +887,13 @@ export default function ConverterWorkspace({
               <Upload size={22} aria-hidden="true" />
             </div>
             <p className="font-serif font-medium text-base text-[#332F29] text-center">
-              Tarik &amp; lepas gambar atau klik untuk memilih
+              Drag &amp; drop gambar ke sini atau pilih file dari perangkatmu.
             </p>
             <p className="text-xs text-[#62584C] mt-1 text-center">
-              Mendukung PNG, JPG, WEBP, BMP, SVG, GIF · Maks. 10 berkas (15 MB/berkas)
+              Mendukung PNG, JPG, WEBP, BMP, SVG, GIF · Maks. 10 file (15 MB per file)
             </p>
             <span className="mt-4 inline-flex items-center gap-1.5 bg-[#A34F38] hover:bg-[#8B3F2A] text-white py-2 px-5 rounded-md text-xs sm:text-sm font-medium transition-colors shadow-xs">
-              Pilih Berkas
+              Choose Files
             </span>
             <input
               id="file-input"
@@ -842,13 +907,14 @@ export default function ConverterWorkspace({
           </div>
 
           {/* Batch Queue list */}
-          {queue.length > 0 && (
+          {queue.length > 0 ? (
             <div className="flex flex-col gap-2 mt-1">
               <div className="flex items-center justify-between text-xs text-[#62584C] px-1">
                 <span className="font-medium text-[#332F29]">
-                  Antrean: {queue.length} berkas{" "}
+                  Antrean: {queue.length} file{" "}
                   <span className="text-[#62584C] font-normal">
-                    ({successCount} selesai{failedCount > 0 ? `, ${failedCount} gagal` : ""})
+                    ({successCount} selesai
+                    {failedCount > 0 ? `, ${failedCount} gagal` : ""})
                   </span>
                 </span>
                 <div className="flex items-center gap-3">
@@ -860,7 +926,9 @@ export default function ConverterWorkspace({
                       className="text-[#A34F38] hover:text-[#8B3F2A] hover:underline font-medium inline-flex items-center gap-1 disabled:opacity-50"
                     >
                       <RotateCcw size={11} aria-hidden="true" />
-                      <span>Coba lagi gagal ({failedCount})</span>
+                      <span>
+                        Retry Failed ({failedCount})
+                      </span>
                     </button>
                   )}
                   <button
@@ -869,12 +937,12 @@ export default function ConverterWorkspace({
                     onClick={clearAllQueue}
                     className="text-[#62584C] hover:text-[#A34F38] hover:underline font-medium transition-colors disabled:opacity-50"
                   >
-                    Hapus semua
+                    Clear All
                   </button>
                 </div>
               </div>
 
-              <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
                 {queue.map((item) => (
                   <div
                     key={item.id}
@@ -889,7 +957,7 @@ export default function ConverterWorkspace({
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      {/* Mini Thumbnail */}
+                      {/* Thumbnail */}
                       <img
                         src={item.convertedUrl || item.url}
                         alt=""
@@ -904,7 +972,7 @@ export default function ConverterWorkspace({
                             {item.name}
                           </p>
                           <span className="text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-[#344638]/10 text-[#344638] border border-[#344638]/20 shrink-0">
-                            &rarr; {formatLabel(item.targetFormat)}
+                            → {formatLabel(item.targetFormat)}
                           </span>
                         </div>
 
@@ -927,7 +995,9 @@ export default function ConverterWorkspace({
                           {item.status === "success" && (
                             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#344638]/15 text-[#344638] border border-[#344638]/30 font-medium">
                               <Check size={10} aria-hidden="true" />
-                              <span>Selesai ({item.convertedSize})</span>
+                              <span>
+                                Berhasil dikonversi ({item.convertedSize})
+                              </span>
                             </span>
                           )}
                           {item.status === "failed" && (
@@ -936,7 +1006,7 @@ export default function ConverterWorkspace({
                               title={item.errorMessage}
                             >
                               <AlertCircle size={10} aria-hidden="true" />
-                              <span className="truncate">{item.errorMessage || "Gagal"}</span>
+                              <span className="truncate">{item.errorMessage || "Konversi gagal"}</span>
                             </span>
                           )}
                         </div>
@@ -951,10 +1021,10 @@ export default function ConverterWorkspace({
                           disabled={isConverting}
                           onClick={() => convertQueueItem(item)}
                           className="h-7 px-2 rounded text-[11px] font-medium border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38] hover:text-white inline-flex items-center gap-1 transition-colors disabled:opacity-50"
-                          title="Coba lagi berkas ini"
+                          title="Coba lagi file ini"
                         >
                           <RotateCcw size={11} aria-hidden="true" />
-                          <span className="hidden sm:inline">Coba lagi</span>
+                          <span className="hidden sm:inline">Retry</span>
                         </button>
                       )}
 
@@ -963,10 +1033,10 @@ export default function ConverterWorkspace({
                           type="button"
                           onClick={() => handleDownloadSingle(item)}
                           className="h-7 px-2 rounded text-[11px] font-medium border border-[#344638] text-[#344638] hover:bg-[#344638] hover:text-white inline-flex items-center gap-1 transition-colors"
-                          title="Unduh berkas ini"
+                          title="Unduh file hasil konversi"
                         >
                           <Download size={11} aria-hidden="true" />
-                          <span className="hidden sm:inline">Unduh</span>
+                          <span className="hidden sm:inline">Download</span>
                         </button>
                       )}
 
@@ -976,7 +1046,7 @@ export default function ConverterWorkspace({
                         onClick={() => removeQueueItem(item.id)}
                         className="p-1 rounded text-[#62584C] hover:text-[#A34F38] hover:bg-[#A34F38]/10 transition-colors disabled:opacity-40"
                         title={`Hapus ${item.name}`}
-                        aria-label={`Hapus berkas ${item.name}`}
+                        aria-label={`Hapus file ${item.name}`}
                       >
                         <Trash2 size={14} aria-hidden="true" />
                       </button>
@@ -985,201 +1055,334 @@ export default function ConverterWorkspace({
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="text-center py-2 text-xs text-[#62584C]/70">
+              Belum ada gambar yang dipilih
+            </div>
           )}
         </div>
 
-        {/* Center conversion icon indicator */}
-        <div className="hidden lg:flex flex-col items-center justify-center gap-1.5 self-center my-auto px-2">
-          <div className="w-10 h-10 rounded-full border border-[#D8CCB9] bg-[#F4EBDD] flex items-center justify-center text-[#344638] shadow-xs">
-            <ArrowRightLeft size={18} aria-hidden="true" />
+        {/* Right Column: Modernized Settings Panel (BAGIAN B & C) */}
+        <div className="w-full lg:w-[350px] xl:w-[370px] bg-[#FFFEFB] border border-[#D8CCB9] rounded-lg p-5 flex flex-col gap-4 shadow-xs shrink-0">
+          {/* Panel Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-[#D8CCB9]">
+            <h2 className="text-xs uppercase tracking-wider font-semibold text-[#332F29] flex items-center gap-2">
+              <Sliders size={14} className="text-[#A34F38]" aria-hidden="true" />
+              <span>Output Settings</span>
+            </h2>
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#F4EBDD] text-[#332F29] border border-[#D8CCB9]">
+              {formatLabel(outputFormat)}
+            </span>
           </div>
-          <span className="text-[11px] uppercase tracking-wider font-semibold text-[#62584C]">Konversi</span>
-        </div>
 
-        {/* Target format box & controls */}
-        <div className="flex-1 flex flex-col gap-4 w-full lg:max-w-[340px] relative">
+          {/* 1. Output Format Selection */}
           <div>
-            <label className="block text-xs uppercase tracking-wider font-semibold text-[#62584C] mb-1.5">
-              Format Keluaran
+            <label className="block text-xs font-medium text-[#332F29] mb-2">
+              Output Format
             </label>
+            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Pilih format output">
+              {supportedFormats.map((fmt) => {
+                const isSelected = outputFormat === fmt.mime;
+                return (
+                  <button
+                    key={fmt.mime}
+                    type="button"
+                    onClick={() => handleFormatSelect(fmt.mime)}
+                    className={`p-2 rounded-md border text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#A34F38] flex flex-col items-start ${
+                      isSelected
+                        ? "border-[#A34F38] bg-[#A34F38]/10 text-[#332F29] ring-1 ring-[#A34F38]"
+                        : "border-[#D8CCB9] bg-[#FFFEFB] hover:border-[#A34F38]/60 hover:bg-[#D4B98A]/10 text-[#332F29]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-xs font-bold">{fmt.label}</span>
+                      {isSelected && (
+                        <Check size={12} className="text-[#A34F38]" aria-hidden="true" />
+                      )}
+                    </div>
+                    <span className="text-[9px] text-[#62584C] mt-0.5 leading-tight">
+                      {fmt.badge}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. Conversion Presets (BAGIAN C) */}
+          <div className="pt-2 border-t border-[#D8CCB9]/60">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-[#332F29]">
+                Conversion Preset
+              </label>
+              {preset === "custom" && (
+                <span className="text-[10px] font-semibold text-[#A34F38] bg-[#A34F38]/10 px-1.5 py-0.2 rounded border border-[#A34F38]/20">
+                  Custom
+                </span>
+              )}
+            </div>
             <div
-              ref={triggerRef}
-              role="button"
-              tabIndex={0}
-              aria-haspopup="menu"
-              aria-expanded={isFormatOpen}
-              onClick={() => setIsFormatOpen(!isFormatOpen)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setIsFormatOpen(!isFormatOpen);
-                }
-              }}
-              className="h-12 border border-[#D8CCB9] rounded-lg px-3.5 bg-[#FFFCF6] hover:border-[#A34F38] focus:outline-none focus:ring-2 focus:ring-[#A34F38] transition-colors cursor-pointer flex items-center justify-between"
+              className="grid grid-cols-3 gap-1 p-0.5 rounded-md border border-[#D8CCB9] bg-[#F4EBDD]/40"
+              role="group"
+              aria-label="Pilihan preset konversi"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded bg-[#D4B98A]/30 text-[#344638] flex items-center justify-center">
-                  <FileImage size={16} aria-hidden="true" />
-                </div>
-                <span className="text-sm font-semibold text-[#332F29]">
-                  {formatLabel(outputFormat)}
+              <button
+                type="button"
+                onClick={() => handlePresetSelect("web-optimized")}
+                className={`py-1.5 px-2 rounded text-[11px] font-medium transition-colors text-center focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] ${
+                  preset === "web-optimized"
+                    ? "bg-[#A34F38] text-white font-semibold shadow-xs"
+                    : "text-[#62584C] hover:text-[#332F29]"
+                }`}
+              >
+                Web Optimized
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePresetSelect("high-quality")}
+                className={`py-1.5 px-2 rounded text-[11px] font-medium transition-colors text-center focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] ${
+                  preset === "high-quality"
+                    ? "bg-[#A34F38] text-white font-semibold shadow-xs"
+                    : "text-[#62584C] hover:text-[#332F29]"
+                }`}
+              >
+                High Quality
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePresetSelect("small-file")}
+                className={`py-1.5 px-2 rounded text-[11px] font-medium transition-colors text-center focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] ${
+                  preset === "small-file"
+                    ? "bg-[#A34F38] text-white font-semibold shadow-xs"
+                    : "text-[#62584C] hover:text-[#332F29]"
+                }`}
+              >
+                Small File
+              </button>
+            </div>
+            <p className="text-[11px] text-[#62584C] mt-1.5 leading-snug">
+              {preset === "web-optimized" &&
+                "Kompresi WebP seimbang (80%) untuk kecepatan muat web."}
+              {preset === "high-quality" &&
+                "Kualitas visual maksimal (95%) dengan detail tajam."}
+              {preset === "small-file" &&
+                "Kompresi tinggi (55%) untuk menghemat ukuran penyimpanan."}
+              {preset === "custom" &&
+                "Pengaturan mandiri untuk kualitas gambar dan dimensi."}
+            </p>
+          </div>
+
+          {/* 3. Image Quality (Conditional for lossy formats) */}
+          {supportsQuality ? (
+            <div className="pt-2 border-t border-[#D8CCB9]/60 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="quality-range-slider"
+                  className="text-xs font-medium text-[#332F29]"
+                >
+                  Image Quality
+                </label>
+                <span className="text-xs font-bold text-[#A34F38] font-mono">
+                  {Math.round(quality * 100)}%
                 </span>
               </div>
+              <input
+                id="quality-range-slider"
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.05"
+                value={quality}
+                onChange={(e) => handleQualityChange(parseFloat(e.target.value))}
+                aria-label="Slider kualitas gambar"
+                className="w-full accent-[#A34F38] cursor-pointer"
+              />
+              <p className="text-[10px] text-[#62584C]/80">
+                Berlaku untuk format JPG dan WebP
+              </p>
+            </div>
+          ) : (
+            <div className="pt-2 border-t border-[#D8CCB9]/60">
+              <p className="text-[11px] text-[#62584C] bg-[#F4EBDD]/40 p-2 rounded border border-[#D8CCB9]/50">
+                {outputFormat === "image/png" &&
+                  "Format PNG bersifat lossless (tanpa slider kompresi)."}
+                {outputFormat === "image/bmp" &&
+                  "Format BMP menyimpan data piksel 24-bit tanpa kompresi."}
+                {outputFormat === "image/svg+xml" &&
+                  "Format SVG mengemas gambar ke dalam kontainer XML raster."}
+                {outputFormat === "image/gif" &&
+                  "Format GIF menggunakan kuantisasi 256 warna frame tunggal."}
+              </p>
+            </div>
+          )}
+
+          {/* 4. Advanced Options (Resize Dimensions) */}
+          <div className="pt-2 border-t border-[#D8CCB9]/60">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center justify-between w-full text-xs font-medium text-[#332F29] py-1 hover:text-[#A34F38] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
+              aria-expanded={showAdvanced}
+            >
+              <span>Advanced Options</span>
               <ChevronDown
-                size={16}
-                className={`text-[#62584C] transition-transform duration-200 ${isFormatOpen ? "rotate-180" : ""}`}
+                size={14}
+                className={`text-[#62584C] transition-transform duration-200 ${
+                  showAdvanced ? "rotate-180" : ""
+                }`}
                 aria-hidden="true"
               />
-            </div>
+            </button>
 
-            {/* Popover */}
-            {isFormatOpen && (
-              <div
-                ref={popoverRef}
-                className="absolute top-full left-0 sm:left-auto sm:right-0 mt-2 w-full sm:w-[280px] z-50 bg-[#FFFCF6] border border-[#D8CCB9] rounded-lg shadow-md p-2.5 grid grid-cols-2 gap-2"
-                role="menu"
-              >
-                {supportedFormats.map((fmt, idx) => {
-                  const isSelected = outputFormat === fmt.mime;
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={!fmt.supported}
-                      className={`border rounded-md py-2 px-2.5 text-left transition-colors flex items-center justify-between ${
-                        fmt.supported
-                          ? isSelected
-                            ? "border-[#A34F38] bg-[#A34F38]/10 text-[#332F29] font-semibold"
-                            : "border-[#D8CCB9] text-[#332F29] hover:bg-[#D4B98A]/20"
-                          : "border-[#D8CCB9]/50 text-[#62584C]/50 bg-[#F4EBDD]/40 cursor-not-allowed"
-                      }`}
-                      onClick={() => {
-                        if (fmt.supported) {
-                          setOutputFormat(fmt.mime);
-                          // Sync format to pending queue items
-                          setQueue((prev) =>
-                            prev.map((it) =>
-                              it.status === "queued" ? { ...it, targetFormat: fmt.mime } : it
-                            )
-                          );
-                          setIsFormatOpen(false);
-                        }
-                      }}
+            {showAdvanced && (
+              <div className="pt-2 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <label
+                      htmlFor="target-width-input"
+                      className="text-[11px] font-medium text-[#62584C]"
                     >
-                      <span className="text-xs sm:text-sm">{fmt.label}</span>
-                      {isSelected && <Check size={14} className="text-[#A34F38]" aria-hidden="true" />}
-                    </button>
-                  );
-                })}
+                      Width (px)
+                    </label>
+                    <input
+                      id="target-width-input"
+                      type="number"
+                      min="0"
+                      placeholder="Auto"
+                      value={targetWidth || ""}
+                      onChange={(e) => handleWidthChange(parseInt(e.target.value) || 0)}
+                      className="h-8 w-full border border-[#D8CCB9] rounded px-2 bg-[#FFFCF6] text-xs text-[#332F29] placeholder-[#62584C]/50 focus:border-[#A34F38] focus:ring-1 focus:ring-[#A34F38] outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label
+                      htmlFor="target-height-input"
+                      className="text-[11px] font-medium text-[#62584C]"
+                    >
+                      Height (px)
+                    </label>
+                    <input
+                      id="target-height-input"
+                      type="number"
+                      min="0"
+                      placeholder="Auto"
+                      value={targetHeight || ""}
+                      onChange={(e) => handleHeightChange(parseInt(e.target.value) || 0)}
+                      className="h-8 w-full border border-[#D8CCB9] rounded px-2 bg-[#FFFCF6] text-xs text-[#332F29] placeholder-[#62584C]/50 focus:border-[#A34F38] focus:ring-1 focus:ring-[#A34F38] outline-none"
+                    />
+                  </div>
+                </div>
+                {(targetWidth > 0 || targetHeight > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTargetWidth(0);
+                      setTargetHeight(0);
+                    }}
+                    className="text-[10px] text-[#A34F38] hover:underline"
+                  >
+                    Reset dimensi (kembali ke Auto)
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* Quality & Dimension controls */}
-          <div className="space-y-3 pt-1 border-t border-[#D8CCB9]/60">
-            {(outputFormat === "image/jpeg" || outputFormat === "image/webp") && (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-[#332F29]">Kualitas Kompresi</label>
-                  <span className="text-xs font-semibold text-[#A34F38]">{Math.round(quality * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1"
-                  step="0.05"
-                  value={quality}
-                  onChange={(e) => setQuality(parseFloat(e.target.value))}
-                  className="w-full accent-[#A34F38] cursor-pointer"
-                />
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-medium text-[#62584C]">Lebar (px)</label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="Otomatis"
-                  value={targetWidth || ""}
-                  onChange={(e) => setTargetWidth(parseInt(e.target.value) || 0)}
-                  className="h-9 w-full border border-[#D8CCB9] rounded-md px-2.5 bg-[#FFFCF6] text-xs text-[#332F29] placeholder-[#62584C]/50 focus:border-[#A34F38] focus:ring-1 focus:ring-[#A34F38] outline-none"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-medium text-[#62584C]">Tinggi (px)</label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="Otomatis"
-                  value={targetHeight || ""}
-                  onChange={(e) => setTargetHeight(parseInt(e.target.value) || 0)}
-                  className="h-9 w-full border border-[#D8CCB9] rounded-md px-2.5 bg-[#FFFCF6] text-xs text-[#332F29] placeholder-[#62584C]/50 focus:border-[#A34F38] focus:ring-1 focus:ring-[#A34F38] outline-none"
-                />
-              </div>
+          {/* 5. Active Settings Summary */}
+          <div className="p-2.5 rounded-md bg-[#F4EBDD]/60 border border-[#D8CCB9] text-xs space-y-1">
+            <p className="text-[10px] uppercase font-semibold text-[#62584C] tracking-wide">
+              Active Configuration
+            </p>
+            <div className="flex items-center justify-between text-[#332F29]">
+              <span className="font-semibold">{formatLabel(outputFormat)}</span>
+              <span className="text-[#62584C]">
+                {preset === "web-optimized" && "Web Optimized"}
+                {preset === "high-quality" && "High Quality"}
+                {preset === "small-file" && "Small File"}
+                {preset === "custom" && "Custom"}
+              </span>
             </div>
+            <div className="flex items-center justify-between text-[11px] text-[#62584C] pt-0.5 border-t border-[#D8CCB9]/40">
+              <span>
+                {supportsQuality
+                  ? `Quality: ${Math.round(quality * 100)}%`
+                  : outputFormat === "image/png" || outputFormat === "image/bmp"
+                  ? "Lossless"
+                  : formatLabel(outputFormat)}
+              </span>
+              <span>
+                {targetWidth > 0 || targetHeight > 0
+                  ? `${targetWidth || "Auto"} × ${targetHeight || "Auto"} px`
+                  : "Original aspect"}
+              </span>
+            </div>
+          </div>
 
-            {/* Honest format disclosures */}
-            {outputFormat === "image/svg+xml" && (
-              <p className="text-[11px] text-[#62584C] bg-[#F4EBDD]/70 p-2.5 rounded-md border border-[#D4B98A]/50 leading-relaxed">
-                <strong className="text-[#344638]">Catatan SVG:</strong> Berkas SVG membungkus gambar raster (embedded raster), bukan vektor hasil tracing.
-              </p>
-            )}
-            {outputFormat === "image/gif" && (
-              <p className="text-[11px] text-[#62584C] bg-[#F4EBDD]/70 p-2.5 rounded-md border border-[#D4B98A]/50 leading-relaxed">
-                <strong className="text-[#344638]">Catatan GIF:</strong> Output menghasilkan GIF statis (frame tunggal, kuantisasi 256 warna). Animasi multi-frame tidak didukung.
-              </p>
-            )}
+          {/* Format Disclosures */}
+          {outputFormat === "image/svg+xml" && (
+            <p className="text-[11px] text-[#62584C] bg-[#F4EBDD]/70 p-2 rounded border border-[#D4B98A]/50 leading-relaxed">
+              Catatan SVG: Berkas SVG membungkus gambar raster (embedded raster), bukan vektor hasil tracing.
+            </p>
+          )}
+          {outputFormat === "image/gif" && (
+            <p className="text-[11px] text-[#62584C] bg-[#F4EBDD]/70 p-2 rounded border border-[#D4B98A]/50 leading-relaxed">
+              Catatan GIF: Output menghasilkan GIF statis (frame tunggal, kuantisasi 256 warna). Animasi multi-frame tidak didukung.
+            </p>
+          )}
+
+          {/* 6. Primary Convert Action Button */}
+          <div className="pt-2 mt-auto">
+            <button
+              type="button"
+              onClick={triggerConvertAll}
+              disabled={queue.length === 0 || isConverting}
+              className="w-full h-12 flex items-center justify-center gap-2 bg-[#A34F38] text-white px-5 rounded-md text-sm font-medium hover:bg-[#8B3F2A] active:scale-[0.99] disabled:bg-[#A34F38]/40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#A34F38] transition-all shadow-xs"
+            >
+              {isConverting ? (
+                <>
+                  <RotateCcw size={16} className="animate-spin" aria-hidden="true" />
+                  <span>
+                    Memproses ({queue.length - queuedCount} / {queue.length})...
+                  </span>
+                </>
+              ) : queuedCount === 0 && failedCount === 0 && successCount > 0 ? (
+                <>
+                  <Check size={16} aria-hidden="true" />
+                  <span>Semua Berhasil Dikonversi</span>
+                </>
+              ) : failedCount > 0 && queuedCount === 0 ? (
+                <>
+                  <RotateCcw size={16} aria-hidden="true" />
+                  <span>Coba Lagi File Gagal ({failedCount})</span>
+                </>
+              ) : (
+                <>
+                  <Layers size={16} aria-hidden="true" />
+                  <span>
+                    {queue.length > 0 ? `Convert All (${queue.length} File)` : "Convert"}
+                  </span>
+                </>
+              )}
+            </button>
           </div>
         </div>
-      </div>
-
-      {/* Convert action button */}
-      <div className="flex justify-center pt-2">
-        <button
-          type="button"
-          onClick={triggerConvertAll}
-          disabled={queue.length === 0 || isConverting}
-          className="h-12 flex items-center justify-center gap-2 bg-[#A34F38] text-white px-8 rounded-lg text-sm font-medium hover:bg-[#8B3F2A] active:scale-[0.99] disabled:bg-[#A34F38]/40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#A34F38] transition-all shadow-xs"
-        >
-          {isConverting ? (
-            <>
-              <RotateCcw size={17} className="animate-spin" aria-hidden="true" />
-              <span>Mengonversi Berkas ({queue.length - queuedCount} / {queue.length})...</span>
-            </>
-          ) : queuedCount === 0 && failedCount === 0 && successCount > 0 ? (
-            <>
-              <Check size={17} aria-hidden="true" />
-              <span>Semua Berkas Selesai Dikonversi</span>
-            </>
-          ) : failedCount > 0 && queuedCount === 0 ? (
-            <>
-              <RotateCcw size={17} aria-hidden="true" />
-              <span>Coba Lagi Berkas Gagal ({failedCount})</span>
-            </>
-          ) : (
-            <>
-              <ArrowRightLeft size={17} aria-hidden="true" />
-              <span>Konversi Semua ({queue.length} Berkas)</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Results and ZIP Download Section */}
       {(successCount > 0 || failedCount > 0) && (
-        <section className="mt-4 pt-6 border-t border-[#D8CCB9] w-full space-y-4">
+        <section className="mt-2 pt-5 border-t border-[#D8CCB9] w-full space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg sm:text-xl font-serif font-bold text-[#332F29]">Hasil Konversi</h2>
+              <h3 className="text-lg sm:text-xl font-serif font-bold text-[#332F29]">
+                Conversion Results
+              </h3>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xs px-2 py-0.5 rounded bg-[#344638]/10 text-[#344638] font-medium border border-[#344638]/20">
-                  {successCount} berkas berhasil
+                  {successCount} file berhasil
                 </span>
                 {failedCount > 0 && (
                   <span className="text-xs px-2 py-0.5 rounded bg-[#A34F38]/10 text-[#A34F38] font-medium border border-[#A34F38]/20">
-                    {failedCount} berkas gagal
+                    {failedCount} file gagal
                   </span>
                 )}
               </div>
@@ -1200,7 +1403,7 @@ export default function ConverterWorkspace({
               ) : (
                 <>
                   <Archive size={15} aria-hidden="true" />
-                  <span>Unduh ZIP ({successCount} Berkas)</span>
+                  <span>Download All (ZIP) ({successCount} File)</span>
                 </>
               )}
             </button>
@@ -1211,9 +1414,14 @@ export default function ConverterWorkspace({
             <div className="border border-[#D8CCB9] rounded-lg bg-[#FFFCF6] divide-y divide-[#D8CCB9] overflow-hidden shadow-xs">
               {successfulItems.map((c) => {
                 const nameMap = getUniqueOutputFilenames(successfulItems);
-                const downloadFilename = nameMap.get(c.id) || `${c.name}_converted.${mimeToExt(c.convertedMime || c.targetFormat)}`;
+                const downloadFilename =
+                  nameMap.get(c.id) ||
+                  `${c.name.replace(/\.[^/.]+$/, "")}_converted.${mimeToExt(c.convertedMime || c.targetFormat)}`;
                 return (
-                  <div key={c.id} className="flex items-center justify-between p-3 sm:px-4 sm:py-3.5 hover:bg-[#D4B98A]/10 transition-colors">
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between p-3 sm:px-4 sm:py-3.5 hover:bg-[#D4B98A]/10 transition-colors"
+                  >
                     <div className="flex items-center gap-3 min-w-0">
                       <img
                         src={c.convertedUrl || c.url}
@@ -1221,14 +1429,19 @@ export default function ConverterWorkspace({
                         className="w-10 h-10 rounded object-cover border border-[#D8CCB9] bg-[#F4EBDD]/50 shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#332F29] truncate max-w-[160px] sm:max-w-[280px]" title={downloadFilename}>
+                        <p
+                          className="text-sm font-medium text-[#332F29] truncate max-w-[160px] sm:max-w-[280px]"
+                          title={downloadFilename}
+                        >
                           {downloadFilename}
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-[#344638]/10 text-[#344638] border border-[#344638]/20">
                             {formatLabel(c.convertedMime || c.targetFormat)}
                           </span>
-                          <span className="text-xs text-[#62584C]">{c.convertedSize || c.size}</span>
+                          <span className="text-xs text-[#62584C]">
+                            {c.convertedSize || c.size}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1238,7 +1451,7 @@ export default function ConverterWorkspace({
                       className="ml-3 h-8 px-3 rounded-md text-xs font-medium border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38] hover:text-[#FFFCF6] inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
                     >
                       <Download size={13} aria-hidden="true" />
-                      <span>Unduh</span>
+                      <span>Download</span>
                     </button>
                   </div>
                 );

@@ -1,4 +1,5 @@
 "use client";
+
 import { validateBatch } from "./lib/validation";
 import ConverterWorkspace from "./components/ConverterWorkspace";
 
@@ -11,10 +12,10 @@ export default function Home() {
             IMAGE CONVERTER · CLIENT-SIDE UTILITY
           </p>
           <h1 className="text-4xl sm:text-5xl font-serif font-bold text-[#332F29] tracking-tight">
-            Convert your images
+            Image Converter
           </h1>
           <p className="text-sm sm:text-base text-[#62584C] max-w-lg mx-auto">
-            Ubah format gambar dengan cepat dan aman langsung di browser Anda tanpa upload ke server.
+            Ubah gambar ke format yang kamu butuhkan dengan mudah.
           </p>
         </div>
         <ConverterWorkspace onValidate={validateBatch} />
@@ -22,6 +23,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-
