@@ -343,8 +343,8 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* H. Footer */}
-        <footer className="pt-8 sm:pt-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs text-[#62584C]">
+        {/* H. Quick Links */}
+        <div className="pt-8 sm:pt-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs text-[#62584C]">
           <div className="flex flex-wrap items-center gap-4">
             <Link
               href="/"
@@ -372,7 +372,7 @@ export default function AboutPage() {
               aria-label="Lisensi TokiConvert di GitHub (buka di tab baru)"
             >
               <FileText size={13} aria-hidden="true" />
-              <span>Lisensi (Draf MIT)</span>
+              <span>Lisensi (MIT)</span>
             </a>
 
             <a
@@ -390,7 +390,7 @@ export default function AboutPage() {
           <p className="text-[#62584C]/80">
             TokiConvert · Open-source utility
           </p>
-        </footer>
+        </div>
       </div>
     </div>
   );
