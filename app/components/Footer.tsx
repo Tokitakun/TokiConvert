@@ -45,10 +45,26 @@ export default function Footer() {
               </li>
               <li>
                 <Link
+                  href="/video"
+                  className="hover:text-[#A34F38] hover:underline transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
+                >
+                  Video Converter
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/document"
                   className="hover:text-[#A34F38] hover:underline transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
                 >
                   Document Converter
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/favicon"
+                  className="hover:text-[#A34F38] hover:underline transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
+                >
+                  Favicon Pack Generator
                 </Link>
               </li>
               <li>

@@ -17,6 +17,7 @@ export default function Navbar() {
     { name: "Video", fullName: "Video Converter", href: "/video" },
     { name: "Document", fullName: "Document Converter", href: "/document" },
     { name: "Media Tools", fullName: "Media Downloader", href: "/media" },
+    { name: "Favicon", fullName: "Favicon Generator", href: "/favicon" },
     { name: "About", fullName: "About TokiConvert", href: "/about" },
   ];
 
