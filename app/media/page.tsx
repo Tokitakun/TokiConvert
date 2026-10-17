@@ -1,7 +1,21 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Music, Video, Download, Link2, AlertTriangle, CheckCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Music,
+  Video,
+  Download,
+  Link2,
+  AlertTriangle,
+  CheckCircle,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Clipboard,
+  X,
+  ShieldCheck,
+} from "lucide-react";
+import RetroProgressBar from "../components/RetroProgressBar";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -114,9 +128,29 @@ export default function MediaPage() {
   // MP3 conversion / proxy download from direct URL
   const [convertStatus, setConvertStatus] = useState<ConvertStatus>("idle");
   const [convertMsg, setConvertMsg] = useState("");
+  const [downloadProgressPct, setDownloadProgressPct] = useState<number | undefined>(undefined);
   const [mp3BlobUrl, setMp3BlobUrl] = useState<string | null>(null);
   const [mp3Filename, setMp3Filename] = useState("audio.mp3");
   const prevBlobRef = useRef<string | null>(null);
+
+  const handlePaste = async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setUrl(text.trim());
+        }
+      }
+    } catch {
+      // Browser permission denied or not supported; ignore gracefully
+    }
+  };
+
+  const handleClear = () => {
+    setUrl("");
+    setResponse(null);
+    resetConvert();
+  };
 
   const resolveWithFormat = async (targetUrl: string, pref: FormatPref) => {
     const trimmed = targetUrl.trim();
@@ -153,6 +187,7 @@ export default function MediaPage() {
     setMp3BlobUrl(null);
     setConvertStatus("idle");
     setConvertMsg("");
+    setDownloadProgressPct(undefined);
   }
 
   /** Safe proxy download for cross-origin URLs */
@@ -202,15 +237,19 @@ export default function MediaPage() {
             const pct = Math.min(100, Math.round((bytesReceived / contentLength) * 100));
             const mbRec = (bytesReceived / 1024 / 1024).toFixed(1);
             const mbTot = (contentLength / 1024 / 1024).toFixed(1);
+            setDownloadProgressPct(pct);
             setConvertMsg(`Mengunduh berkas: ${pct}% (${mbRec} / ${mbTot} MB)…`);
           } else {
             const mb = (bytesReceived / 1024 / 1024).toFixed(2);
+            setDownloadProgressPct(undefined);
             setConvertMsg(`Mengunduh berkas: ${mb} MB diterima…`);
           }
         }
       }
 
       if (bytesReceived === 0) throw new Error("Berkas media kosong.");
+
+      setDownloadProgressPct(100);
 
       const blob = new Blob(chunks as BlobPart[], {
         type: proxyRes.headers.get("content-type") || "application/octet-stream",
@@ -283,9 +322,11 @@ export default function MediaPage() {
             const pct = Math.min(100, Math.round((bytesReceived / contentLength) * 100));
             const mbRec = (bytesReceived / 1024 / 1024).toFixed(1);
             const mbTot = (contentLength / 1024 / 1024).toFixed(1);
+            setDownloadProgressPct(pct);
             setConvertMsg(`Mengunduh stream: ${pct}% (${mbRec} / ${mbTot} MB)…`);
           } else {
             const mb = (bytesReceived / 1024 / 1024).toFixed(2);
+            setDownloadProgressPct(undefined);
             setConvertMsg(`Mengunduh stream: ${mb} MB diterima…`);
           }
         }
@@ -293,6 +334,7 @@ export default function MediaPage() {
 
       if (bytesReceived === 0) throw new Error("File media kosong — tidak dapat diproses.");
 
+      setDownloadProgressPct(undefined);
       setConvertStatus("converting");
       setConvertMsg("Mendekode audio & mengenkode ke MPEG Layer III (lamejs)…");
 
@@ -342,6 +384,7 @@ export default function MediaPage() {
       const blobUrl = URL.createObjectURL(mp3Blob);
       prevBlobRef.current = blobUrl;
       setMp3BlobUrl(blobUrl);
+      setDownloadProgressPct(100);
       setConvertStatus("done");
       setConvertMsg("Konversi ke MPEG Layer III MP3 selesai — siap diunduh.");
     } catch (err: unknown) {
@@ -429,30 +472,61 @@ export default function MediaPage() {
 
         {/* ── URL Input Form ───────────────────────────────────────────────── */}
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 mb-8">
-          <input
-            id="media-url-input"
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.tiktok.com/@user/video/123…"
-            className="flex-1 border border-[#D8CCB9] rounded-lg px-4 py-3 bg-[#FFFCF6] text-sm text-[#332F29] placeholder-[#62584C]/50 focus:outline-none focus:ring-2 focus:ring-[#A34F38] focus:border-[#A34F38] transition-colors"
-            required
-            disabled={loading}
-          />
+          <div className="relative flex-1">
+            <label htmlFor="media-url-input" className="sr-only">
+              URL Media Publik
+            </label>
+            <input
+              id="media-url-input"
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Tempel tautan TikTok, YouTube, Spotify, SoundCloud, dll…"
+              className="w-full border border-[#D8CCB9] rounded-lg pl-4 pr-20 py-3 bg-[#FFFCF6] text-sm text-[#332F29] placeholder-[#62584C]/50 focus:outline-none focus:ring-2 focus:ring-[#A34F38] focus:border-[#A34F38] transition-colors"
+              required
+              disabled={loading}
+            />
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {url ? (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  disabled={loading}
+                  className="p-1.5 text-[#62584C] hover:text-[#A34F38] rounded hover:bg-[#D4B98A]/20 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38]"
+                  title="Bersihkan input URL"
+                  aria-label="Bersihkan input URL"
+                >
+                  <X size={16} aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePaste}
+                  disabled={loading}
+                  className="px-2 py-1 text-xs text-[#62584C] hover:text-[#332F29] rounded hover:bg-[#D4B98A]/20 inline-flex items-center gap-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38]"
+                  title="Tempel tautan dari clipboard"
+                  aria-label="Tempel tautan dari clipboard"
+                >
+                  <Clipboard size={13} aria-hidden="true" />
+                  <span className="hidden xs:inline text-[11px]">Paste</span>
+                </button>
+              )}
+            </div>
+          </div>
           <button
             type="submit"
             disabled={loading || !url.trim()}
-            className="flex items-center justify-center gap-2 bg-[#A34F38] text-white py-3 px-6 rounded-lg text-sm font-medium hover:bg-[#8B3F2A] disabled:bg-[#A34F38]/40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#A34F38] transition-colors whitespace-nowrap"
+            className="min-h-[46px] flex items-center justify-center gap-2 bg-[#A34F38] text-white py-3 px-6 rounded-lg text-sm font-medium hover:bg-[#8B3F2A] active:scale-[0.99] disabled:bg-[#A34F38]/40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#A34F38] transition-all whitespace-nowrap shadow-xs"
           >
             {loading ? (
               <>
                 <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                Memproses…
+                <span>Memproses…</span>
               </>
             ) : (
               <>
                 <Link2 size={16} aria-hidden="true" />
-                Resolve URL
+                <span>Resolve URL</span>
               </>
             )}
           </button>
@@ -511,7 +585,7 @@ export default function MediaPage() {
                     {/* Media Card Header with Thumbnail */}
                     <div className="flex flex-col sm:flex-row gap-4 items-start">
                       {response.result.thumbnail && (
-                        <div className="w-full sm:w-44 h-28 sm:h-28 rounded-lg overflow-hidden border border-[#D8CCB9] bg-[#F4EBDD] flex-shrink-0 relative">
+                        <div className="w-full sm:w-44 h-28 rounded-lg overflow-hidden border border-[#D8CCB9] bg-[#F4EBDD] flex-shrink-0 relative">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={response.result.thumbnail}
@@ -601,56 +675,63 @@ export default function MediaPage() {
                             </button>
                           )}
                         </div>
-                        <div className="grid gap-2">
+                        <div className="grid gap-2.5">
                           {visibleLinks.map((dl, i) => (
                             <div
                               key={i}
-                              className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-3 py-2.5 rounded border border-[#D8CCB9] bg-[#FFFCF6] gap-2"
+                              className="flex flex-col md:flex-row md:items-center md:justify-between p-3 rounded-lg border border-[#D8CCB9] bg-[#FFFCF6] gap-3 shadow-2xs"
                             >
                               <div className="flex flex-col min-w-0">
                                 <span className="font-medium text-[#332F29] text-sm flex items-center gap-1.5">
                                   {isAudioLink(dl) && <Music size={14} className="text-[#344638]" aria-hidden="true" />}
                                   {isVideoLink(dl) && <Video size={14} className="text-[#344638]" aria-hidden="true" />}
-                                  {isAudioLink(dl) ? `Audio (${dl.quality ?? "Direct Stream"})` : isVideoLink(dl) ? `Video (${dl.quality ?? "Direct Stream"})` : (dl.quality ?? dl.type ?? `Format ${i + 1}`)}
+                                  <span>
+                                    {isAudioLink(dl) ? `Audio (${dl.quality ?? "Direct Stream"})` : isVideoLink(dl) ? `Video (${dl.quality ?? "Direct Stream"})` : (dl.quality ?? dl.type ?? `Format ${i + 1}`)}
+                                  </span>
                                 </span>
                                 {dl.url && (
-                                  <span className="text-[#62584C] text-xs truncate max-w-[280px] sm:max-w-[340px]">{dl.url}</span>
+                                  <span className="text-[#62584C] text-xs truncate max-w-[280px] sm:max-w-[400px] mt-0.5">{dl.url}</span>
                                 )}
                               </div>
                               {isValidHttpUrl(dl.url) && (
                                 <div className="flex flex-wrap gap-2 shrink-0 items-center">
+                                  {/* 1. Primary recommended action: Safe download via signed proxy */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadViaProxy(dl, response?.result?.title)}
+                                    disabled={convertStatus === "fetching" || convertStatus === "converting"}
+                                    className="h-8 inline-flex items-center gap-1.5 text-xs bg-[#344638] text-[#FFFCF6] hover:bg-[#253328] px-3 rounded-md font-medium transition-colors shadow-2xs disabled:opacity-50"
+                                    title="Unduh melalui proxy terverifikasi TokiConvert (menghindari CORS dan memaksakan dialog simpan berkas)"
+                                    aria-label="Download berkas via proxy terverifikasi"
+                                  >
+                                    <ShieldCheck size={13} aria-hidden="true" />
+                                    <span>Download via Proxy</span>
+                                  </button>
+
+                                  {/* 2. Direct Link */}
                                   <a
                                     href={dl.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     download
-                                    className="inline-flex items-center gap-1 text-xs bg-[#344638] text-[#FFFCF6] hover:bg-[#2a3a2c] px-3 py-1.5 rounded font-medium transition-colors"
-                                    aria-label={`Download langsung ${dl.quality ?? dl.type ?? "file"}`}
+                                    className="h-8 inline-flex items-center gap-1.5 text-xs border border-[#D8CCB9] text-[#332F29] hover:bg-[#D4B98A]/20 px-3 rounded-md font-medium transition-colors"
+                                    aria-label={`Buka tautan langsung ${dl.quality ?? dl.type ?? "berkas"}`}
                                   >
-                                    <Download size={12} aria-hidden="true" />
-                                    Download Langsung
+                                    <Download size={13} aria-hidden="true" />
+                                    <span>Tautan Langsung</span>
                                   </a>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadViaProxy(dl, response?.result?.title)}
-                                    disabled={convertStatus === "fetching" || convertStatus === "converting"}
-                                    className="inline-flex items-center gap-1 text-xs border border-[#344638] text-[#344638] hover:bg-[#344638]/10 px-2.5 py-1.5 rounded font-medium transition-colors disabled:opacity-50"
-                                    title="Unduh melalui proxy server TokiConvert untuk memaksakan download berkas"
-                                    aria-label="Download aman via proxy"
-                                  >
-                                    <Download size={11} aria-hidden="true" />
-                                    via Proxy
-                                  </button>
+
+                                  {/* 3. Pure MP3 extraction via Web Audio client-side */}
                                   <button
                                     type="button"
                                     onClick={() => handleFetchAsMP3(dl, response?.result?.title)}
                                     disabled={convertStatus === "fetching" || convertStatus === "converting"}
-                                    className="inline-flex items-center gap-1 text-xs border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38]/10 px-2.5 py-1.5 rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Ekstrak atau konversi ke MPEG Layer III (MP3 murni) via lamejs"
-                                    aria-label="Ekstrak ke MP3 Murni di browser"
+                                    className="h-8 inline-flex items-center gap-1.5 text-xs border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38]/10 px-3 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Ekstrak audio atau konversi ke MPEG Layer III (MP3 murni) di peramban via lamejs"
+                                    aria-label="Ekstrak ke MP3 Murni di peramban"
                                   >
-                                    <Music size={11} aria-hidden="true" />
-                                    Ekstrak MP3 Murni
+                                    <Music size={13} aria-hidden="true" />
+                                    <span>Ekstrak MP3 Murni</span>
                                   </button>
                                 </div>
                               )}
@@ -684,45 +765,66 @@ export default function MediaPage() {
           </div>
         )}
 
-        {/* ── MP3 Conversion Status ────────────────────────────────────────── */}
+        {/* ── Media Download & Conversion Progress Status ─────────────────────── */}
         {convertStatus !== "idle" && (
           <div
-            className={`mb-8 border rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+            className={`mb-8 border rounded-lg p-5 flex flex-col gap-3 shadow-xs ${
               convertStatus === "error"
                 ? "border-[#A34F38]/40 bg-[#A34F38]/5"
                 : convertStatus === "done"
                 ? "border-[#344638]/40 bg-[#344638]/5"
-                : "border-[#D8CCB9] bg-[#F4EBDD]/40"
+                : "border-[#D8CCB9] bg-[#FFFCF6]"
             }`}
             role="status"
             aria-live="polite"
           >
-            <div className="flex items-center gap-2 text-sm">
-              {(convertStatus === "fetching" || convertStatus === "converting") && (
-                <Loader2 size={16} className="animate-spin text-[#A34F38] shrink-0" aria-hidden="true" />
-              )}
-              {convertStatus === "done" && (
-                <CheckCircle size={16} className="text-[#344638] shrink-0" aria-hidden="true" />
-              )}
-              {convertStatus === "error" && (
-                <AlertTriangle size={16} className="text-[#A34F38] shrink-0" aria-hidden="true" />
-              )}
-              <span className={convertStatus === "error" ? "text-[#A34F38]" : "text-[#332F29]"}>
-                {convertStatus === "fetching" && "Mengambil file dari URL…"}
-                {convertStatus === "converting" && "Mengonversi ke MP3…"}
-                {convertStatus === "done" && "Konversi selesai — siap diunduh."}
-                {convertStatus === "error" && convertMsg}
-              </span>
-            </div>
-            {convertStatus === "done" && mp3BlobUrl && (
-              <a
-                href={mp3BlobUrl}
-                download={mp3Filename}
-                className="inline-flex items-center gap-1.5 text-xs bg-[#344638] text-[#FFFCF6] hover:bg-[#2a3a2c] px-4 py-2 rounded font-medium transition-colors whitespace-nowrap shrink-0"
-              >
-                <Download size={13} aria-hidden="true" />
-                Unduh {mp3Filename}
-              </a>
+            {(convertStatus === "fetching" || convertStatus === "converting") && (
+              <div className="w-full space-y-2">
+                <RetroProgressBar
+                  value={downloadProgressPct}
+                  totalBlocks={16}
+                  variant={convertStatus === "converting" ? "gold" : "terracotta"}
+                  label={
+                    convertStatus === "converting"
+                      ? "MENGENKODE KE MPEG LAYER III (MP3)"
+                      : "MENGAMBIL STREAM MEDIA VIA PROXY"
+                  }
+                />
+                <p className="text-xs text-[#62584C] font-mono">
+                  {convertMsg || "Menghubungkan ke upstream…"}
+                </p>
+              </div>
+            )}
+
+            {convertStatus === "done" && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm text-[#344638]">
+                  <CheckCircle size={18} className="text-[#344638] shrink-0" aria-hidden="true" />
+                  <span className="font-medium text-[#332F29]">
+                    {convertMsg || "Proses unduhan selesai."}
+                  </span>
+                </div>
+                {mp3BlobUrl && (
+                  <a
+                    href={mp3BlobUrl}
+                    download={mp3Filename}
+                    className="h-9 inline-flex items-center justify-center gap-2 text-xs bg-[#344638] text-[#FFFCF6] hover:bg-[#253328] px-4 rounded-md font-medium transition-colors whitespace-nowrap shrink-0 shadow-xs"
+                  >
+                    <Download size={14} aria-hidden="true" />
+                    <span>Simpan {mp3Filename}</span>
+                  </a>
+                )}
+              </div>
+            )}
+
+            {convertStatus === "error" && (
+              <div className="flex items-start gap-2.5 text-sm">
+                <AlertTriangle size={18} className="text-[#A34F38] mt-0.5 shrink-0" aria-hidden="true" />
+                <div className="space-y-0.5">
+                  <p className="font-semibold text-[#A34F38]">Terjadi Kendala Pengunduhan</p>
+                  <p className="text-xs text-[#62584C]">{convertMsg}</p>
+                </div>
+              </div>
             )}
           </div>
         )}

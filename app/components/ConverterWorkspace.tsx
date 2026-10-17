@@ -881,7 +881,7 @@ export default function ConverterWorkspace({
             onClick={openFilePicker}
             className={`border-2 border-dashed rounded-lg p-6 sm:p-8 flex flex-col items-center justify-center min-h-[200px] transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#A34F38] ${
               isDragging
-                ? "border-[#A34F38] bg-[#D4B98A]/25 scale-[1.01]"
+                ? "border-[#A34F38] bg-[#D4B98A]/30 scale-[1.01] shadow-xs"
                 : "border-[#D8CCB9] bg-[#FFFCF6] hover:border-[#A34F38]/70 hover:bg-[#D4B98A]/10"
             }`}
           >
@@ -889,7 +889,9 @@ export default function ConverterWorkspace({
               <Upload size={22} aria-hidden="true" />
             </div>
             <p className="font-serif font-medium text-base text-[#332F29] text-center">
-              Drag &amp; drop gambar ke sini atau pilih file dari perangkatmu.
+              {isDragging
+                ? "Lepaskan gambar untuk menambahkan ke antrean!"
+                : "Drag & drop gambar ke sini atau pilih file dari perangkatmu."}
             </p>
             <p className="text-xs text-[#62584C] mt-1 text-center">
               Mendukung PNG, JPG, WEBP, BMP, SVG, GIF · Maks. 10 file (15 MB per file)
@@ -944,11 +946,11 @@ export default function ConverterWorkspace({
                 </div>
               </div>
 
-              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                 {queue.map((item) => (
                   <div
                     key={item.id}
-                    className={`flex items-center justify-between p-2.5 rounded-md border transition-colors ${
+                    className={`flex items-center justify-between p-2.5 sm:p-3 rounded-lg border transition-colors ${
                       item.status === "failed"
                         ? "border-[#A34F38]/40 bg-[#A34F38]/5"
                         : item.status === "success"
@@ -958,22 +960,23 @@ export default function ConverterWorkspace({
                         : "border-[#D8CCB9] bg-[#FFFCF6] hover:bg-[#D4B98A]/10"
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       {/* Thumbnail */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={item.convertedUrl || item.url}
-                        alt=""
-                        className="w-9 h-9 rounded object-cover border border-[#D8CCB9] bg-[#F4EBDD]/50 shrink-0"
+                        alt={`Pratinjau ${item.name}`}
+                        className="w-10 h-10 rounded object-cover border border-[#D8CCB9] bg-[#F4EBDD]/50 shrink-0"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p
-                            className="truncate text-xs font-medium text-[#332F29] max-w-[130px] sm:max-w-[200px]"
+                            className="text-xs font-medium text-[#332F29] truncate max-w-[150px] sm:max-w-[240px]"
                             title={item.name}
                           >
                             {item.name}
                           </p>
-                          <span className="text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-[#344638]/10 text-[#344638] border border-[#344638]/20 shrink-0">
+                          <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-[#344638]/10 text-[#344638] border border-[#344638]/20 shrink-0">
                             → {formatLabel(item.targetFormat)}
                           </span>
                         </div>
@@ -998,7 +1001,7 @@ export default function ConverterWorkspace({
                             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#344638]/15 text-[#344638] border border-[#344638]/30 font-medium">
                               <Check size={10} aria-hidden="true" />
                               <span>
-                                Berhasil dikonversi ({item.convertedSize})
+                                Sukses ({item.convertedSize})
                               </span>
                             </span>
                           )}
@@ -1015,17 +1018,17 @@ export default function ConverterWorkspace({
                       </div>
                     </div>
 
-                    {/* Item action buttons */}
+                    {/* Item action buttons with comfortable tap area */}
                     <div className="flex items-center gap-1.5 ml-2 shrink-0">
                       {item.status === "failed" && (
                         <button
                           type="button"
                           disabled={isConverting}
                           onClick={() => convertQueueItem(item)}
-                          className="h-7 px-2 rounded text-[11px] font-medium border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38] hover:text-white inline-flex items-center gap-1 transition-colors disabled:opacity-50"
+                          className="min-h-[36px] px-2.5 rounded text-[11px] font-medium border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38] hover:text-white inline-flex items-center gap-1 transition-colors disabled:opacity-50"
                           title="Coba lagi file ini"
                         >
-                          <RotateCcw size={11} aria-hidden="true" />
+                          <RotateCcw size={12} aria-hidden="true" />
                           <span className="hidden sm:inline">Retry</span>
                         </button>
                       )}
@@ -1034,10 +1037,10 @@ export default function ConverterWorkspace({
                         <button
                           type="button"
                           onClick={() => handleDownloadSingle(item)}
-                          className="h-7 px-2 rounded text-[11px] font-medium border border-[#344638] text-[#344638] hover:bg-[#344638] hover:text-white inline-flex items-center gap-1 transition-colors"
+                          className="min-h-[36px] px-2.5 rounded text-[11px] font-medium border border-[#344638] text-[#344638] hover:bg-[#344638] hover:text-white inline-flex items-center gap-1 transition-colors"
                           title="Unduh file hasil konversi"
                         >
-                          <Download size={11} aria-hidden="true" />
+                          <Download size={12} aria-hidden="true" />
                           <span className="hidden sm:inline">Download</span>
                         </button>
                       )}
@@ -1046,11 +1049,11 @@ export default function ConverterWorkspace({
                         type="button"
                         disabled={isConverting}
                         onClick={() => removeQueueItem(item.id)}
-                        className="p-1 rounded text-[#62584C] hover:text-[#A34F38] hover:bg-[#A34F38]/10 transition-colors disabled:opacity-40"
+                        className="min-w-[36px] min-h-[36px] flex items-center justify-center p-1.5 rounded text-[#62584C] hover:text-[#A34F38] hover:bg-[#A34F38]/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38]"
                         title={`Hapus ${item.name}`}
                         aria-label={`Hapus file ${item.name}`}
                       >
-                        <Trash2 size={14} aria-hidden="true" />
+                        <Trash2 size={15} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
@@ -1058,8 +1061,31 @@ export default function ConverterWorkspace({
               </div>
             </div>
           ) : (
-            <div className="text-center py-2 text-xs text-[#62584C]/70">
-              Belum ada gambar yang dipilih
+            <div className="p-4 rounded-lg border border-[#D8CCB9] bg-[#FFFCF6] text-xs text-[#62584C] space-y-3 shadow-2xs">
+              <div className="flex items-center gap-2 text-[#332F29] font-medium font-serif text-sm">
+                <Layers size={16} className="text-[#A34F38]" aria-hidden="true" />
+                <span>Panduan Cepat Konversi Gambar</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5">
+                <div className="p-2.5 rounded bg-[#F4EBDD]/50 border border-[#D8CCB9]/60 space-y-1">
+                  <span className="font-semibold text-[#A34F38] text-[11px] block">1. Pilih Gambar</span>
+                  <p className="text-[11px] leading-relaxed">
+                    Seret gambar ke area upload di atas atau klik tombol Choose Files (maks. 10 berkas).
+                  </p>
+                </div>
+                <div className="p-2.5 rounded bg-[#F4EBDD]/50 border border-[#D8CCB9]/60 space-y-1">
+                  <span className="font-semibold text-[#A34F38] text-[11px] block">2. Tentukan Preset</span>
+                  <p className="text-[11px] leading-relaxed">
+                    Pilih format (WEBP, JPG, PNG, dll) dan kualitas kompresi di panel kanan.
+                  </p>
+                </div>
+                <div className="p-2.5 rounded bg-[#F4EBDD]/50 border border-[#D8CCB9]/60 space-y-1">
+                  <span className="font-semibold text-[#A34F38] text-[11px] block">3. Konversi &amp; Unduh</span>
+                  <p className="text-[11px] leading-relaxed">
+                    Klik tombol Convert, lalu unduh berkas satuan atau unduh seluruhnya dalam arsip ZIP.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1376,6 +1402,28 @@ export default function ConverterWorkspace({
                 </>
               )}
             </button>
+
+            {/* Quick ZIP download shortcut when conversion completed */}
+            {successCount > 0 && !isConverting && (
+              <button
+                type="button"
+                onClick={handleDownloadZip}
+                disabled={isZipping}
+                className="w-full mt-2 h-10 flex items-center justify-center gap-2 bg-[#344638] text-white px-4 rounded-md text-xs sm:text-sm font-medium hover:bg-[#28362b] active:scale-[0.99] disabled:bg-[#344638]/40 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#344638] transition-all shadow-xs"
+              >
+                {isZipping ? (
+                  <>
+                    <RotateCcw size={14} className="animate-spin" aria-hidden="true" />
+                    <span>Membuat Arsip ZIP...</span>
+                  </>
+                ) : (
+                  <>
+                    <Archive size={14} aria-hidden="true" />
+                    <span>Download All (ZIP) ({successCount} File)</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1435,9 +1483,10 @@ export default function ConverterWorkspace({
                     className="flex items-center justify-between p-3 sm:px-4 sm:py-3.5 hover:bg-[#D4B98A]/10 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={c.convertedUrl || c.url}
-                        alt={c.name}
+                        alt={`Hasil konversi ${c.name}`}
                         className="w-10 h-10 rounded object-cover border border-[#D8CCB9] bg-[#F4EBDD]/50 shrink-0"
                       />
                       <div className="min-w-0">
