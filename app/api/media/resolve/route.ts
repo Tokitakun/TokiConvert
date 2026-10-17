@@ -5,8 +5,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import dns from "dns/promises";
-import net from "net";
+import { assertSafeHost, assertSafePort } from "@/app/lib/ssrfGuard";
+import { signProxyUrl } from "@/app/lib/proxySignature";
+import { checkRateLimit, getClientIp } from "@/app/lib/rateLimiter";
+import { isAllowedMediaHost, isSafeMediaUrlToSign } from "@/app/lib/mediaAllowlist";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -16,7 +18,8 @@ export type ErrorCategory =
   | "ssrf"
   | "timeout"
   | "upstream"
-  | "no_result";
+  | "no_result"
+  | "rate_limit";
 
 export interface ResolveErrorResult {
   status: false;
@@ -26,8 +29,6 @@ export interface ResolveErrorResult {
 }
 
 // ── Safe diagnostic logger ────────────────────────────────────────────────────
-// Only logs safe metadata: stage, category, sanitized host, method, upstream status.
-// Never logs raw URLs with query params, cookies, tokens, or credentials.
 function logDiagnostic(params: {
   stage: string;
   category: ErrorCategory;
@@ -44,72 +45,11 @@ function logDiagnostic(params: {
   );
 }
 
-// ── SSRF guard ────────────────────────────────────────────────────────────────
-
-function isPrivateIPv4(ip: string): boolean {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return true;
-  const [a, b] = parts;
-  return (
-    a === 10 ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    a === 0 ||
-    a >= 240
-  );
-}
-
-function isPrivateIPv6(ip: string): boolean {
-  const lower = ip.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
-  return (
-    lower === "::1" ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    lower.startsWith("fe80") ||
-    lower.startsWith("::ffff:")
-  );
-}
-
-/**
- * Validates that the hostname does not point to internal/loopback/private IP addresses.
- * Uses dns.lookup (OS getaddrinfo) rather than dns.resolve (c-ares) to avoid ECONNREFUSED
- * errors on systems where local DNS stub resolvers block direct port-53 queries.
- */
-async function assertSafeHost(hostname: string): Promise<void> {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
-    throw new Error("SSRF_BLOCKED");
-  }
-  if (net.isIPv4(h)) {
-    if (isPrivateIPv4(h)) throw new Error("SSRF_BLOCKED");
-    return;
-  }
-  if (net.isIPv6(h)) {
-    if (isPrivateIPv6(h)) throw new Error("SSRF_BLOCKED");
-    return;
-  }
-
-  try {
-    const lookupResults = await dns.lookup(hostname, { all: true });
-    if (!lookupResults || lookupResults.length === 0) {
-      throw new Error("DNS_UNREACHABLE");
-    }
-    for (const record of lookupResults) {
-      const addr = record.address;
-      if (net.isIPv4(addr) && isPrivateIPv4(addr)) throw new Error("SSRF_BLOCKED");
-      if (net.isIPv6(addr) && isPrivateIPv6(addr)) throw new Error("SSRF_BLOCKED");
-    }
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message === "SSRF_BLOCKED") throw err;
-    throw new Error("DNS_UNREACHABLE");
-  }
-}
-
 // ── Domain allowlist ──────────────────────────────────────────────────────────
 
 type PlatformKey =
+  | "youtube"
+  | "spotify"
   | "tiktok"
   | "instagram"
   | "twitter"
@@ -131,6 +71,8 @@ interface AllowedPlatform {
 }
 
 const ALLOWED_PLATFORMS: AllowedPlatform[] = [
+  { label: "YouTube", hostnames: ["youtube.com", "youtu.be", "m.youtube.com"], note: "Video & audio YouTube publik (MP4 720p & MP3 320kbps).", resolver: "youtube", enabled: true },
+  { label: "Spotify", hostnames: ["spotify.com", "open.spotify.com"], note: "Track Spotify publik.", resolver: "spotify", enabled: true },
   { label: "TikTok", hostnames: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"], note: "Menggunakan scraper pihak ketiga; endpoint dapat berubah sewaktu-waktu.", resolver: "tiktok", enabled: true },
   { label: "Instagram", hostnames: ["instagram.com"], note: "Hanya konten publik.", resolver: "instagram", enabled: true },
   { label: "Twitter / X", hostnames: ["twitter.com", "x.com"], note: "Hanya tweet publik.", resolver: "twitter", enabled: true },
@@ -172,13 +114,185 @@ interface ScraprCallResult {
   methodUsed?: string;
 }
 
-async function callScrapr(resolver: PlatformKey, url: string, host: string): Promise<ScraprCallResult> {
-  const TIMEOUT_MS = 10_000;
+async function callScrapr(
+  resolver: PlatformKey,
+  url: string,
+  host: string,
+  format?: "best" | "mp3" | "mp4"
+): Promise<ScraprCallResult> {
+  const TIMEOUT_MS = 15_000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scrapr = (await import("@coflyn/scrapr")) as any;
 
-  // Instagram special handling: use fallback chain (direct -> indown -> snapsave)
-  // snapinsta is deliberately excluded to avoid heavy browser automation (playwright) requirements.
+  // 1. YouTube specialized resolver with format negotiation and resilient fallback
+  if (resolver === "youtube") {
+    const ytmp3 = scrapr.youtube?.ytmp3;
+    const ytmp3gg = scrapr.youtube?.ytmp3gg;
+
+    if (!ytmp3 && !ytmp3gg) {
+      return { status: false, category: "validation", message: "Modul YouTube resolver tidak tersedia." };
+    }
+
+    try {
+      if (format === "mp3") {
+        if (ytmp3) {
+          const res = await ytmp3(url, "mp3");
+          if (res && res.status) return { ...res, methodUsed: "youtube.ytmp3.mp3" };
+        }
+        if (ytmp3gg) {
+          const res2 = await ytmp3gg(url);
+          if (res2 && res2.status) return { ...res2, methodUsed: "youtube.ytmp3gg" };
+        }
+        return {
+          status: false,
+          category: "no_result",
+          message: "Gagal memperoleh stream audio MP3 YouTube. Konten mungkin dibatasi usia, regional, atau berstatus privat.",
+          methodUsed: "youtube.ytmp3",
+        };
+      }
+
+      if (format === "mp4") {
+        if (ytmp3) {
+          const res = await ytmp3(url, "mp4");
+          if (res && res.status) return { ...res, methodUsed: "youtube.ytmp3.mp4" };
+        }
+        return {
+          status: false,
+          category: "no_result",
+          message: "Gagal memperoleh stream video MP4 YouTube. Konten mungkin dibatasi usia, regional, atau berstatus privat.",
+          methodUsed: "youtube.ytmp3",
+        };
+      }
+
+      // format === "best" or undefined: attempt both MP4 and MP3 in parallel
+      const [resMp4, resMp3] = await Promise.allSettled([
+        ytmp3 ? ytmp3(url, "mp4") : Promise.resolve(null),
+        ytmp3 ? ytmp3(url, "mp3") : Promise.resolve(null),
+      ]);
+
+      const valMp4 = resMp4.status === "fulfilled" && resMp4.value?.status ? resMp4.value : null;
+      const valMp3 = resMp3.status === "fulfilled" && resMp3.value?.status ? resMp3.value : null;
+
+      if (valMp4 || valMp3) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const baseResult = ((valMp4?.result || valMp3?.result || {}) as Record<string, any>);
+        const mp4Downloads = Array.isArray(valMp4?.result?.downloads) ? valMp4.result.downloads : [];
+        const mp3Downloads = Array.isArray(valMp3?.result?.downloads) ? valMp3.result.downloads : [];
+
+        // Combine downloads with unique URLs
+        const seenUrls = new Set<string>();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const combinedDownloads: any[] = [];
+        for (const dl of [...mp4Downloads, ...mp3Downloads]) {
+          if (dl && dl.url && !seenUrls.has(dl.url)) {
+            seenUrls.add(dl.url);
+            combinedDownloads.push(dl);
+          }
+        }
+
+        return {
+          status: true,
+          result: {
+            ...baseResult,
+            downloads: combinedDownloads,
+          },
+          methodUsed: "youtube.ytmp3.combined",
+        };
+      }
+
+      // Fallback to ytmp3gg
+      if (ytmp3gg) {
+        const resGg = await ytmp3gg(url);
+        if (resGg && resGg.status) return { ...resGg, methodUsed: "youtube.ytmp3gg" };
+      }
+
+      return {
+        status: false,
+        category: "no_result",
+        message: "Tidak dapat mengambil media YouTube. Video mungkin dibatasi hak cipta, usia, atau berstatus privat.",
+        methodUsed: "youtube.ytmp3",
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      return { status: false, category: "upstream", message: msg || "Gagal memproses YouTube.", methodUsed: "youtube" };
+    }
+  }
+
+  // 2. Spotify specialized resolver
+  if (resolver === "spotify") {
+    const methods: { name: string; fn: ScrapeFn }[] = [
+      { name: "spotmate", fn: scrapr.spotify?.spotmate },
+      { name: "soundloaders", fn: scrapr.spotify?.soundloaders },
+      { name: "spotidown", fn: scrapr.spotify?.spotidown },
+      { name: "spotisaver", fn: scrapr.spotify?.spotisaver },
+    ].filter((m) => typeof m.fn === "function");
+
+    let lastError = "Gagal memproses track Spotify.";
+    let lastMethod = "spotmate";
+
+    for (const candidate of methods) {
+      lastMethod = candidate.name;
+      try {
+        const singleTimeout = new Promise<{ status: false; message: string }>((_, reject) =>
+          setTimeout(() => reject(new Error("TIMEOUT")), 8_000)
+        );
+        const res = await Promise.race([candidate.fn(url), singleTimeout]);
+        if (res && res.status) {
+          return { ...res, methodUsed: `spotify.${candidate.name}` };
+        }
+        if (res?.message) lastError = res.message;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg) lastError = msg;
+      }
+    }
+
+    return {
+      status: false,
+      category: "no_result",
+      message: lastError,
+      methodUsed: `spotify.${lastMethod}`,
+    };
+  }
+
+  // 3. TikTok with fallback chain (snaptik -> tiktokio -> ssstik -> savetik)
+  if (resolver === "tiktok") {
+    const methods: { name: string; fn: ScrapeFn }[] = [
+      { name: "snaptik", fn: scrapr.tiktok?.snaptik },
+      { name: "tiktokio", fn: scrapr.tiktok?.tiktokio },
+      { name: "ssstik", fn: scrapr.tiktok?.ssstik },
+      { name: "savetik", fn: scrapr.tiktok?.savetik },
+    ].filter((m) => typeof m.fn === "function");
+
+    let lastError = "Gagal memproses URL TikTok.";
+    let lastMethod = "snaptik";
+
+    for (const candidate of methods) {
+      lastMethod = candidate.name;
+      try {
+        const singleTimeout = new Promise<{ status: false; message: string }>((_, reject) =>
+          setTimeout(() => reject(new Error("TIMEOUT")), 8_000)
+        );
+        const res = await Promise.race([candidate.fn(url), singleTimeout]);
+        if (res && res.status) {
+          return { ...res, methodUsed: `tiktok.${candidate.name}` };
+        }
+        if (res?.message) lastError = res.message;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg) lastError = msg;
+      }
+    }
+
+    return {
+      status: false,
+      category: "no_result",
+      message: lastError,
+      methodUsed: `tiktok.${lastMethod}`,
+    };
+  }
+
+  // 4. Instagram fallback chain (direct -> indown -> snapsave)
   if (resolver === "instagram") {
     const methods: { name: string; fn: ScrapeFn }[] = [
       { name: "direct", fn: scrapr.instagram?.direct },
@@ -239,15 +353,12 @@ async function callScrapr(resolver: PlatformKey, url: string, host: string): Pro
     };
   }
 
+  // 5. Standard platform resolvers
   let scrapeFn: ScrapeFn | null = null;
   let methodName = "default";
   switch (resolver) {
-    case "tiktok":
-      scrapeFn = scrapr.tiktok?.snaptik ?? scrapr.tiktok?.ssstik ?? Object.values(scrapr.tiktok as ScraprModule)[0];
-      methodName = "tiktok.snaptik";
-      break;
     case "twitter":
-      scrapeFn = scrapr.twitter?.direct ?? Object.values(scrapr.twitter as ScraprModule)[0];
+      scrapeFn = scrapr.twitter?.direct ?? scrapr.twitter?.tweeload ?? Object.values(scrapr.twitter as ScraprModule)[0];
       methodName = "twitter";
       break;
     case "reddit":
@@ -259,7 +370,7 @@ async function callScrapr(resolver: PlatformKey, url: string, host: string): Pro
       methodName = "bandcamp";
       break;
     case "soundcloud":
-      scrapeFn = Object.values(scrapr.soundcloud as ScraprModule)[0];
+      scrapeFn = scrapr.soundcloud?.klickaud ?? Object.values(scrapr.soundcloud as ScraprModule)[0];
       methodName = "soundcloud";
       break;
     case "mediafire":
@@ -309,6 +420,9 @@ async function callScrapr(resolver: PlatformKey, url: string, host: string): Pro
 
 function sanitiseResult(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) return raw;
+  if (Array.isArray(raw)) {
+    return raw.map((item) => sanitiseResult(item));
+  }
   const safe: Record<string, unknown> = {};
   const blocklist = new Set(["cookie", "token", "auth", "secret", "key", "password", "credential", "sessionid"]);
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
@@ -318,10 +432,134 @@ function sanitiseResult(raw: unknown): unknown {
   return safe;
 }
 
+function safeSign(urlStr: string): { token?: string; expiresAt?: number } {
+  try {
+    const sig = signProxyUrl(urlStr);
+    return { token: sig.token, expiresAt: sig.expiresAt };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "CONFIG_ERROR";
+    console.error(`[media/resolve] Failed to sign URL: ${msg}`);
+    return {};
+  }
+}
+
+function attachProxySignatures(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = { ...(raw as Record<string, any>) };
+
+  // 1. If downloads is missing or empty, extract from alternative fields
+  if (!res.downloads || (Array.isArray(res.downloads) && res.downloads.length === 0)) {
+    const fallbackUrl =
+      (typeof res.url === "string" && res.url.startsWith("http") ? res.url : null) ||
+      (typeof res.audio === "string" && res.audio.startsWith("http") ? res.audio : null) ||
+      (typeof res.audio_url === "string" && res.audio_url.startsWith("http") ? res.audio_url : null) ||
+      (typeof res.video === "string" && res.video.startsWith("http") ? res.video : null) ||
+      (typeof res.download_url === "string" && res.download_url.startsWith("http") ? res.download_url : null) ||
+      (typeof res.download === "string" && res.download.startsWith("http") ? res.download : null);
+
+    if (fallbackUrl && isSafeMediaUrlToSign(fallbackUrl)) {
+      const sig = safeSign(fallbackUrl);
+      if (sig.token && sig.expiresAt) {
+        const isAudio = /audio|mp3|m4a|wav/i.test(fallbackUrl);
+        res.downloads = [
+          {
+            type: isAudio ? "audio" : "video",
+            quality: "Direct Source",
+            url: fallbackUrl,
+            label: isAudio ? "Audio Stream" : "Video Stream",
+            proxyToken: sig.token,
+            proxyExpiresAt: sig.expiresAt,
+          },
+        ];
+      }
+    }
+  }
+
+  // 2. Sign all items in downloads
+  if (res.downloads) {
+    if (Array.isArray(res.downloads)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      res.downloads = res.downloads.map((dl: any) => {
+        if (!dl || typeof dl !== "object") return dl;
+        const targetUrl = dl.url || dl.link || dl.download;
+        if (typeof targetUrl === "string" && isSafeMediaUrlToSign(targetUrl)) {
+          const sig = safeSign(targetUrl);
+          if (sig.token && sig.expiresAt) {
+            return {
+              ...dl,
+              url: targetUrl,
+              proxyToken: sig.token,
+              proxyExpiresAt: sig.expiresAt,
+            };
+          }
+        }
+        return dl;
+      });
+    } else if (typeof res.downloads === "object") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const copy: Record<string, any> = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const [k, dl] of Object.entries(res.downloads as Record<string, any>)) {
+        if (dl && typeof dl === "object") {
+          const targetUrl = dl.url || dl.link || dl.download;
+          if (typeof targetUrl === "string" && isSafeMediaUrlToSign(targetUrl)) {
+            const sig = safeSign(targetUrl);
+            if (sig.token && sig.expiresAt) {
+              copy[k] = {
+                ...dl,
+                url: targetUrl,
+                proxyToken: sig.token,
+                proxyExpiresAt: sig.expiresAt,
+              };
+              continue;
+            }
+          }
+        }
+        copy[k] = dl;
+      }
+      res.downloads = copy;
+    }
+  }
+
+  // 3. Also sign top-level res.url if present and safe
+  if (typeof res.url === "string" && isSafeMediaUrlToSign(res.url)) {
+    const sig = safeSign(res.url);
+    if (sig.token && sig.expiresAt) {
+      res.proxyToken = sig.token;
+      res.proxyExpiresAt = sig.expiresAt;
+    }
+  }
+
+  return res;
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: { url?: string };
+  const clientIp = getClientIp(req.headers);
+
+  // 1. Rate Limiting Check (20 requests per minute per IP)
+  const rateLimit = checkRateLimit(`${clientIp}:resolve_media`, 20, 60);
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      {
+        status: false,
+        errorCategory: "rate_limit",
+        message: `Terlalu banyak permintaan analisis media. Harap tunggu ${rateLimit.resetSeconds} detik sebelum mencoba lagi.`,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimit.resetSeconds),
+          "X-RateLimit-Limit": String(rateLimit.limit),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  let body: { url?: string; format?: "best" | "mp3" | "mp4" };
   try {
     body = await req.json();
   } catch {
@@ -342,8 +580,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   let parsed: URL;
+  let candidate: string;
   try {
-    const candidate = rawUrl.startsWith("http://") || rawUrl.startsWith("https://") ? rawUrl : "https://" + rawUrl;
+    candidate = rawUrl.startsWith("http://") || rawUrl.startsWith("https://") ? rawUrl : "https://" + rawUrl;
     parsed = new URL(candidate);
     if (!parsed.hostname.includes(".")) {
       throw new Error("INVALID_HOST");
@@ -364,7 +603,85 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 1. Allowlist check first
+  try {
+    assertSafePort(parsed.port);
+  } catch {
+    return NextResponse.json(
+      { status: false, errorCategory: "validation", message: "Port tujuan tidak diizinkan. Hanya port standar 80/443 yang didukung." },
+      { status: 400 }
+    );
+  }
+
+  // 2. Direct Media URL handling with allowlist check, SSRF validation, and signed token
+  const isDirectMedia = /\.(mp3|wav|ogg|m4a|aac|flac|mp4|webm)(\?.*)?$/i.test(parsed.pathname);
+  if (isDirectMedia) {
+    if (!isAllowedMediaHost(parsed.hostname)) {
+      logDiagnostic({ stage: "direct_media_allowlist", category: "validation", host: parsed.hostname });
+      return NextResponse.json(
+        {
+          status: false,
+          errorCategory: "validation",
+          message: `Domain "${parsed.hostname}" tidak diizinkan untuk unduhan direct media. Hanya platform yang didukung dan sumber media terpercaya (misal archive.org, wikimedia.org, raw.githubusercontent.com) yang dapat diunduh.`,
+        },
+        { status: 403 }
+      );
+    }
+
+    try {
+      await assertSafeHost(parsed.hostname);
+      const isAudio = /\.(mp3|wav|ogg|m4a|aac|flac)(\?.*)?$/i.test(parsed.pathname);
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const rawName = decodeURIComponent(parts[parts.length - 1] || "media_file");
+      const sig = signProxyUrl(candidate);
+
+      return NextResponse.json({
+        status: true,
+        platform: "Direct Media URL",
+        platformNote: "Tautan berkas media langsung terverifikasi via proxy server aman.",
+        result: {
+          title: rawName,
+          downloads: [
+            {
+              type: isAudio ? "audio" : "video",
+              quality: "Direct Source",
+              url: candidate,
+              label: isAudio ? "Audio Stream" : "Video Stream",
+              proxyToken: sig.token,
+              proxyExpiresAt: sig.expiresAt,
+            },
+          ],
+        },
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("SERVER_CONFIG_ERROR")) {
+        return NextResponse.json(
+          {
+            status: false,
+            errorCategory: "upstream",
+            message: "Layanan penandatanganan proxy belum dikonfigurasi dengan benar di server.",
+          },
+          { status: 500 }
+        );
+      }
+      if (msg === "SSRF_BLOCKED") {
+        return NextResponse.json(
+          {
+            status: false,
+            errorCategory: "ssrf",
+            message: "URL mengarah ke alamat jaringan lokal atau privat yang diblokir demi keamanan.",
+          },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json(
+        { status: false, errorCategory: "dns", message: "Host direct media tidak dapat dijangkau di DNS." },
+        { status: 404 }
+      );
+    }
+  }
+
+  // 3. Allowlist check for platform URLs
   const platform = matchPlatform(parsed.hostname);
   if (!platform) {
     logDiagnostic({ stage: "platform_match", category: "validation", host: parsed.hostname });
@@ -378,7 +695,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 2. SSRF & DNS check on allowed host
+  // 4. SSRF & DNS check on allowed host
   try {
     await assertSafeHost(parsed.hostname);
   } catch (err: unknown) {
@@ -409,7 +726,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let scraprResult: ScraprCallResult;
   try {
-    scraprResult = await callScrapr(resolverKey, rawUrl, parsed.hostname);
+    scraprResult = await callScrapr(resolverKey, rawUrl, parsed.hostname, body.format);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "unknown";
     if (msg === "TIMEOUT") {
@@ -470,7 +787,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: true,
     platform: platform?.label ?? "URL",
     platformNote: platform?.note ?? "",
-    result: sanitiseResult(scraprResult.result),
+    result: attachProxySignatures(sanitiseResult(scraprResult.result)),
   });
 }
 

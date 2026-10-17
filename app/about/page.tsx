@@ -9,6 +9,9 @@ import {
   Compass,
   FileText,
   GitBranch,
+  Lock,
+  Server,
+  Cpu,
 } from "lucide-react";
 
 export default function AboutPage() {
@@ -16,39 +19,40 @@ export default function AboutPage() {
     {
       category: "Framework & Core",
       items: [
-        { name: "Next.js 16 (App Router)", role: "Framework utama aplikasi web dan routing" },
-        { name: "React 19", role: "Pustaka antarmuka komponen berbasis UI deklaratif" },
-        { name: "TypeScript", role: "Pengetikan statis untuk stabilitas dan keandalan kode" },
+        { name: "Next.js 16 (App Router)", role: "Framework utama aplikasi web dan routing dinamis" },
+        { name: "React 19", role: "Pustaka antarmuka deklaratif berbasis komponen" },
+        { name: "TypeScript", role: "Pengetikan statis untuk keandalan dan stabilitas kode" },
       ],
     },
     {
       category: "Styling & UI",
       items: [
-        { name: "Tailwind CSS v4", role: "Engine styling utilitas bertema Vintage Retro Classic" },
-        { name: "Lucide React", role: "Ikon antarmuka fungsional dan proporsional" },
+        { name: "Tailwind CSS v4", role: "Mesin styling utilitas bertema Vintage Retro Classic" },
+        { name: "Lucide React", role: "Ikon antarmuka fungsional, proporsional, dan aksesibel" },
       ],
     },
     {
-      category: "Conversion & Processing",
+      category: "Client-Side Processing",
       items: [
-        { name: "HTML5 Canvas API", role: "Mesin pemrosesan dan konversi gambar sisi klien" },
-        { name: "Web Audio API + lamejs", role: "Decode dan encode audio ke MP3 langsung di browser" },
-        { name: "pdf-lib", role: "Generasi dan penggabungan PDF dari teks dan gambar" },
+        { name: "HTML5 Canvas API", role: "Mesin konversi dan kompresi format gambar di peramban" },
+        { name: "Web Audio API + lamejs", role: "Dekode audio dan enkoding MP3 murni tanpa WASM berat" },
+        { name: "pdf-lib", role: "Pembuatan dan manipulasi dokumen PDF dari teks atau gambar" },
         { name: "mammoth + DOMPurify", role: "Parser dokumen Word (.docx) ke HTML tersanitasi" },
-        { name: "JSZip", role: "Pemaketan berkas hasil konversi batch ke arsip ZIP" },
+        { name: "JSZip", role: "Pemaketan berkas hasil konversi batch ke dalam arsip ZIP" },
       ],
     },
     {
-      category: "Media & Server",
+      category: "Server-Side & Security",
       items: [
-        { name: "@coflyn/scrapr", role: "Resolusi metadata dan tautan unduhan dari URL media publik" },
-        { name: "SSRF Guard (dns.lookup)", role: "Proteksi server dari DNS rebinding dan akses jaringan internal" },
+        { name: "@coflyn/scrapr", role: "Resolusi metadata dan format dari URL media publik" },
+        { name: "Safe Socket DNS Pinning", role: "Mitigasi TOCTOU / DNS rebinding dan pencegahan SSRF" },
+        { name: "HMAC-SHA256 Token & Allowlist", role: "Pencegahan Open Proxy dengan fail-closed secret" },
       ],
     },
     {
       category: "Development Tooling",
       items: [
-        { name: "pnpm", role: "Manajer paket cepat dan efisien" },
+        { name: "pnpm", role: "Manajer paket cepat dan hemat ruang disk" },
         { name: "ESLint 9", role: "Pemeriksaan standar kualitas dan konsistensi kode" },
       ],
     },
@@ -84,44 +88,88 @@ export default function AboutPage() {
 
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-wider font-semibold text-[#A34F38]">
-              Product Overview &amp; Notes
+              Product Overview &amp; Architecture Notes
             </p>
             <h1 className="text-3xl sm:text-4xl font-serif font-bold text-[#332F29] tracking-tight">
               About TokiConvert
             </h1>
           </div>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed max-w-3xl">
-            TokiConvert adalah utilitas web terbuka yang dirancang untuk konversi format berkas secara sederhana, cepat, dan menjaga privasi data pengguna tanpa proses yang rumit.
+            TokiConvert adalah utilitas web terbuka yang dirancang untuk konversi format berkas secara sederhana, cepat, dan mengutamakan privasi data pengguna melalui pemrosesan lokal di sisi klien.
           </p>
         </header>
 
-        {/* B. About the Project */}
+        {/* B. About the Project & Philosophy */}
         <section className="pt-8 sm:pt-10 space-y-3">
           <div className="flex items-center gap-2.5">
             <ShieldCheck size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#332F29]">
-              About the Project
+              About the Project &amp; Philosophy
             </h2>
           </div>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            TokiConvert adalah utilitas konversi berkas yang berjalan sepenuhnya di peramban (<span className="italic font-medium text-[#332F29]">client-side</span>) untuk semua pemrosesan lokal — gambar, audio, dan dokumen — tanpa mengunggah berkas ke server mana pun.
+            Filosofi utama TokiConvert adalah <span className="font-semibold text-[#332F29]">privacy-by-design</span>. Sebagian besar alat konversi online konvensional mewajibkan pengguna mengunggah dokumen pribadi ke server cloud mereka. TokiConvert mengubah paradigma ini dengan memproses konversi berkas langsung di peramban pengguna (<span className="italic font-medium text-[#332F29]">client-side processing</span>).
           </p>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            <span className="font-medium text-[#332F29]">Image Converter</span> mendukung PNG, JPEG, WEBP, BMP, SVG, dan GIF dengan opsi dimensi dan kualitas. <span className="font-medium text-[#332F29]">Audio Converter</span> mendekode audio via Web Audio API dan mengenkode ke MP3 menggunakan lamejs — tanpa WASM. <span className="font-medium text-[#332F29]">Document Converter</span> menghasilkan PDF dari teks atau gambar, dan mengurai DOCX ke HTML tersanitasi.
-          </p>
-          <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            <span className="font-medium text-[#332F29]">Media Downloader</span> me-resolve metadata dan tautan unduhan dari URL media publik di berbagai platform, diproses di sisi server dengan proteksi SSRF aktif.
+            Aplikasi ini tidak menggunakan basis data, tidak memerlukan pendaftaran akun, bebas pelacak invasif, dan tidak menyimpan salinan berkas lokal yang Anda konversi.
           </p>
         </section>
 
-        {/* C. The Maker */}
+        {/* C. Privacy & Architecture Model */}
+        <section className="pt-8 sm:pt-10 space-y-4">
+          <div className="flex items-center gap-2.5">
+            <Lock size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
+            <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#332F29]">
+              Privacy &amp; Architecture Model
+            </h2>
+          </div>
+          <p className="text-sm text-[#62584C]">
+            Untuk transparansi teknis, berikut adalah pembagian pemrosesan aktual dalam TokiConvert:
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            {/* Box Client-Side */}
+            <div className="border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded-lg p-5 space-y-2.5">
+              <div className="flex items-center gap-2 text-[#344638]">
+                <Cpu size={18} aria-hidden="true" />
+                <h3 className="text-sm font-serif font-bold text-[#332F29]">
+                  1. Pemrosesan di Peramban (Client-Side)
+                </h3>
+              </div>
+              <ul className="text-xs sm:text-sm text-[#62584C] space-y-1.5 list-disc list-inside">
+                <li><strong className="text-[#332F29]">Image Converter:</strong> Konversi PNG, JPEG, WEBP, BMP, SVG, GIF, dan kompresi kualitas via Canvas API.</li>
+                <li><strong className="text-[#332F29]">Audio Converter:</strong> Decode berkas audio dan encode ke MP3 murni via Web Audio API + lamejs.</li>
+                <li><strong className="text-[#332F29]">Document Converter:</strong> Pembuatan PDF via pdf-lib dan pratinjau DOCX tersanitasi via mammoth + DOMPurify.</li>
+                <li><strong className="text-[#332F29]">Jaminan Privasi:</strong> Berkas tidak pernah diunggah atau meninggalkan perangkat Anda.</li>
+              </ul>
+            </div>
+
+            {/* Box Server-Side */}
+            <div className="border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded-lg p-5 space-y-2.5">
+              <div className="flex items-center gap-2 text-[#A34F38]">
+                <Server size={18} aria-hidden="true" />
+                <h3 className="text-sm font-serif font-bold text-[#332F29]">
+                  2. Layanan Media di Server (Server-Assisted)
+                </h3>
+              </div>
+              <ul className="text-xs sm:text-sm text-[#62584C] space-y-1.5 list-disc list-inside">
+                <li><strong className="text-[#332F29]">Media Downloader:</strong> Server hanya memproses URL media publik yang dimasukkan pengguna, bukan file lokal.</li>
+                <li><strong className="text-[#332F29]">Open Proxy Prevention:</strong> Token tanda tangan HMAC-SHA256 berumur pendek mencegah penyalahgunaan server sebagai open proxy.</li>
+                <li><strong className="text-[#332F29]">SSRF Socket Pinning:</strong> Perlindungan tingkat soket TCP untuk memblokir IP privat, loopback, dan cloud metadata.</li>
+                <li><strong className="text-[#332F29]">Batasan Protektif:</strong> Ukuran unduhan dibatasi maksimal 50 MB dengan batas waktu 15 detik.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* D. The Maker */}
         <section className="pt-8 sm:pt-10 space-y-3">
           <div className="flex items-center gap-2.5">
             <User size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#332F29]">The Maker</h2>
           </div>
           <p className="text-sm sm:text-base text-[#62584C] leading-relaxed">
-            TokiConvert dikembangkan oleh <span className="font-semibold text-[#332F29]">Nafis</span> sebagai proyek utilitas independen. Tujuan pengembangannya adalah menghadirkan alat konversi gambar yang bersih, ringan, bebas iklan, dan tidak memerlukan instalasi aplikasi tambahan maupun registrasi akun.
+            TokiConvert dikembangkan oleh <span className="font-semibold text-[#332F29]">Nafis</span> sebagai proyek utilitas sumber terbuka. Tujuan pengembangannya adalah menghadirkan alat konversi berkas yang rapi, cepat, berfokus pada privasi, dan bebas dari iklan yang mengganggu.
           </p>
           <div className="pt-1">
             <a
@@ -137,7 +185,7 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* D. Built With */}
+        {/* E. Built With */}
         <section className="pt-8 sm:pt-10 space-y-4">
           <div className="flex items-center gap-2.5">
             <Layers size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
@@ -168,14 +216,14 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* E. Project Inspirations */}
+        {/* F. Project Inspirations */}
         <section className="pt-8 sm:pt-10 space-y-3">
           <div className="flex items-center gap-2.5">
             <HeartHandshake size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#332F29]">Project Inspirations</h2>
           </div>
           <p className="text-sm text-[#62584C]">
-            Pengembangan TokiConvert merujuk dan terinspirasi dari dua proyek sumber terbuka berikut:
+            Pengembangan fitur TokiConvert merujuk dan terinspirasi dari proyek sumber terbuka berikut:
           </p>
           <div className="space-y-3 pt-1">
             <div className="border border-[#D8CCB9] rounded p-4 bg-[#F4EBDD]/25 space-y-1">
@@ -193,7 +241,7 @@ export default function AboutPage() {
                 </a>
               </div>
               <p className="text-xs sm:text-sm text-[#62584C] leading-relaxed">
-                Referensi aplikasi pengunduh media yang menjadi inspirasi tata letak produk yang bersih dan fokus utilitas.
+                Referensi aplikasi pengunduh media yang menjadi inspirasi tata letak produk yang bersih, minimalis, dan berfokus pada utilitas.
               </p>
             </div>
 
@@ -212,7 +260,7 @@ export default function AboutPage() {
                 </a>
               </div>
               <p className="text-xs sm:text-sm text-[#62584C] leading-relaxed">
-                Toolkit Node.js untuk ekstraksi media dan resolusi tautan, dijadikan referensi konseptual arsitektur penanganan URL di masa depan. <span className="font-medium text-[#332F29]">scrapr bukan dependency maupun mesin konversi gambar TokiConvert.</span>
+                Toolkit Node.js untuk ekstraksi metadata media dari berbagai platform publik, dipadukan dengan kebijakan domain allowlist dan pengamanan soket jaringan di TokiConvert.
               </p>
             </div>
           </div>
@@ -221,16 +269,16 @@ export default function AboutPage() {
           </p>
         </section>
 
-        {/* F. Current Scope & Future Plans */}
+        {/* G. Current Scope & Limitations */}
         <section className="pt-8 sm:pt-10 space-y-3">
           <div className="flex items-center gap-2.5">
             <Compass size={22} className="text-[#344638] shrink-0" aria-hidden="true" />
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#332F29]">
-              Current Scope &amp; Future Plans
+              Scope, Limitations &amp; Future Notes
             </h2>
           </div>
           <p className="text-sm text-[#62584C]">
-            Batasan fitur yang sudah aktif saat ini serta gambaran rencana ke depan:
+            Status fitur yang aktif saat ini serta batasan teknis yang berlaku:
           </p>
           <div className="space-y-2.5 pt-1">
             <div className="flex items-start sm:items-center gap-3 text-sm border border-[#D8CCB9] bg-[#F4EBDD]/40 rounded p-3">
@@ -240,7 +288,7 @@ export default function AboutPage() {
               <div>
                 <span className="font-semibold text-[#332F29]">Image Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  — Konversi format gambar lokal (PNG, JPG, WEBP, BMP, SVG, GIF), dimensi kustom, kompresi kualitas, dan ekspor arsip ZIP.
+                  — Batch konversi gambar (PNG, JPG, WEBP, BMP, SVG, GIF), kontrol dimensi, kompresi kualitas, dan unduhan arsip ZIP (maks 10 file @ 15 MB).
                 </span>
               </div>
             </div>
@@ -252,7 +300,7 @@ export default function AboutPage() {
               <div>
                 <span className="font-semibold text-[#332F29]">Audio Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  (WAV, MP3, OGG) berbasis Web Audio API dan FFmpeg WebAssembly.
+                  — Konversi audio lokal (WAV, MP3, OGG, M4A) ke MP3 murni menggunakan Web Audio API + lamejs langsung di browser tanpa upload.
                 </span>
               </div>
             </div>
@@ -264,7 +312,7 @@ export default function AboutPage() {
               <div>
                 <span className="font-semibold text-[#332F29]">Document Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  (TXT ke PDF, Gambar ke PDF, DOCX ke HTML tersanitasi) di sisi browser.
+                  — Teks &amp; Gambar ke PDF (via pdf-lib) serta pembacaan DOCX ke HTML tersanitasi (via mammoth + DOMPurify) sepenuhnya di sisi peramban.
                 </span>
               </div>
             </div>
@@ -276,7 +324,7 @@ export default function AboutPage() {
               <div>
                 <span className="font-semibold text-[#332F29]">Media Downloader</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  — Resolve metadata dan tautan unduhan dari URL media publik (TikTok, Instagram, SoundCloud, dll.) dengan pilihan format MP3 atau MP4. Diproses server-side dengan SSRF guard.
+                  — Ekstraksi metadata dari URL media publik dan pengaliran stream via proxy terverifikasi (batas 50 MB, timeout 15 detik). Kecepatan bergantung pada pembatasan server asal upstream.
                 </span>
               </div>
             </div>
@@ -288,14 +336,14 @@ export default function AboutPage() {
               <div>
                 <span className="font-semibold text-[#332F29]">Video Converter</span>
                 <span className="text-[#62584C] text-xs sm:text-sm block sm:inline sm:ml-2">
-                  — Konversi format video lokal (MP4, WEBM, dll.) menggunakan FFmpeg WebAssembly. Terkendala kompatibilitas COOP/COEP header di deployment saat ini.
+                  — Konversi video lokal via FFmpeg WebAssembly. Belum diaktifkan karena kebutuhan header isolasi cross-origin (COOP/COEP) pada lingkungan deployment saat ini.
                 </span>
               </div>
             </div>
           </div>
         </section>
 
-        {/* G. Footer */}
+        {/* H. Footer */}
         <footer className="pt-8 sm:pt-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs text-[#62584C]">
           <div className="flex flex-wrap items-center gap-4">
             <Link
@@ -321,7 +369,7 @@ export default function AboutPage() {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 hover:text-[#332F29] hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
-              aria-label="Lisensi MIT TokiConvert (buka di tab baru)"
+              aria-label="Lisensi TokiConvert di GitHub (buka di tab baru)"
             >
               <FileText size={13} aria-hidden="true" />
               <span>Lisensi (Draf MIT)</span>
@@ -332,7 +380,7 @@ export default function AboutPage() {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 hover:text-[#332F29] hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
-              aria-label="Panduan Kontribusi TokiConvert (buka di tab baru)"
+              aria-label="Panduan Kontribusi TokiConvert di GitHub (buka di tab baru)"
             >
               <FileText size={13} aria-hidden="true" />
               <span>Panduan Kontribusi</span>
@@ -347,4 +395,3 @@ export default function AboutPage() {
     </div>
   );
 }
-
