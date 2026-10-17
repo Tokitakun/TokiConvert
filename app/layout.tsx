@@ -17,6 +17,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TokiConvert — Image Converter & Media Tools",
   description: "Ubah format gambar dengan cepat dan aman langsung di browser tanpa upload ke server.",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+  },
 };
 
 export default function RootLayout({
