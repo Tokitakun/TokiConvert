@@ -12,7 +12,7 @@ export default function Navbar() {
   const navContainerRef = useRef<HTMLDivElement>(null);
 
   const navLinks = [
-    { name: "Image", fullName: "Image Converter", href: "/" },
+    { name: "Image", fullName: "Image Converter", href: "/image" },
     { name: "Audio", fullName: "Audio Converter", href: "/audio" },
     { name: "Video", fullName: "Video Converter", href: "/video" },
     { name: "Document", fullName: "Document Converter", href: "/document" },

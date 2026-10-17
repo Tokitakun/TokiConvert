@@ -29,7 +29,7 @@ export default function Footer() {
             <ul className="space-y-1.5 text-xs sm:text-sm text-[#62584C]">
               <li>
                 <Link
-                  href="/"
+                  href="/image"
                   className="hover:text-[#A34F38] hover:underline transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-[#A34F38] rounded"
                 >
                   Image Converter
