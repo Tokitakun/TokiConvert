@@ -11,6 +11,8 @@ interface DownloadLink {
   url?: string;
   label?: string;
   ext?: string;
+  proxyToken?: string;
+  proxyExpiresAt?: number;
 }
 
 interface AuthorInfo {
@@ -49,7 +51,7 @@ type ConvertStatus = "idle" | "fetching" | "converting" | "done" | "error";
 /* ─── Supported platforms ────────────────────────────────────────────────── */
 
 const PLATFORMS = [
-  "TikTok", "Instagram", "Twitter / X", "Reddit",
+  "YouTube", "Spotify", "TikTok", "Instagram", "Twitter / X", "Reddit",
   "Bandcamp", "SoundCloud", "MediaFire", "Pixeldrain",
   "Catbox", "Google Drive", "URL Shortener",
 ];
@@ -84,8 +86,12 @@ function isVideoLink(dl: DownloadLink): boolean {
 
 function filterByPref(links: DownloadLink[], pref: FormatPref): DownloadLink[] {
   if (pref === "best" || links.length === 0) return links;
-  const filtered = links.filter(pref === "mp3" ? isAudioLink : isVideoLink);
-  return filtered.length > 0 ? filtered : links; // fallback: show all if no match
+  return links.filter(pref === "mp3" ? isAudioLink : isVideoLink);
+}
+
+function isValidHttpUrl(url?: string): boolean {
+  if (!url || typeof url !== "string") return false;
+  return url.startsWith("http://") || url.startsWith("https://");
 }
 
 function safeFilename(title?: string, ext = "bin"): string {
@@ -105,16 +111,16 @@ export default function MediaPage() {
   const [response, setResponse] = useState<ApiResponse | null>(null);
   const [showPlatforms, setShowPlatforms] = useState(false);
 
-  // MP3 conversion from direct URL
+  // MP3 conversion / proxy download from direct URL
   const [convertStatus, setConvertStatus] = useState<ConvertStatus>("idle");
   const [convertMsg, setConvertMsg] = useState("");
   const [mp3BlobUrl, setMp3BlobUrl] = useState<string | null>(null);
   const [mp3Filename, setMp3Filename] = useState("audio.mp3");
   const prevBlobRef = useRef<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!url.trim()) return;
+  const resolveWithFormat = async (targetUrl: string, pref: FormatPref) => {
+    const trimmed = targetUrl.trim();
+    if (!trimmed) return;
     setLoading(true);
     setResponse(null);
     resetConvert();
@@ -123,7 +129,7 @@ export default function MediaPage() {
       const res = await fetch("/api/media/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: trimmed, format: pref }),
       });
       const data: ApiResponse = await res.json();
       setResponse(data);
@@ -132,6 +138,11 @@ export default function MediaPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await resolveWithFormat(url, formatPref);
   };
 
   function resetConvert() {
@@ -144,20 +155,106 @@ export default function MediaPage() {
     setConvertMsg("");
   }
 
-  /** Fetch a direct media URL via the proxy then encode to MP3 client-side */
-  async function handleFetchAsMP3(mediaUrl: string, title?: string) {
+  /** Safe proxy download for cross-origin URLs */
+  async function handleDownloadViaProxy(dl: DownloadLink, title?: string) {
+    if (!dl.url) return;
+    resetConvert();
+    try {
+      setConvertStatus("fetching");
+      setConvertMsg("Menghubungi proxy aman…");
+
+      const proxyRes = await fetch("/api/audio/fetch-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: dl.url,
+          token: dl.proxyToken,
+          expiresAt: dl.proxyExpiresAt,
+        }),
+      });
+
+      if (!proxyRes.ok) {
+        const err = await proxyRes.json().catch(() => ({ message: "Gagal mengunduh media." }));
+        throw new Error(err.message ?? "Gagal mengunduh media.");
+      }
+
+      const contentLength = parseInt(
+        proxyRes.headers.get("x-media-size") || proxyRes.headers.get("content-length") || "0",
+        10
+      );
+
+      const filename =
+        proxyRes.headers.get("x-media-filename") || safeFilename(title, "bin");
+
+      const reader = proxyRes.body?.getReader();
+      if (!reader) throw new Error("Stream response body tidak dapat dibaca.");
+
+      const chunks: Uint8Array[] = [];
+      let bytesReceived = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          bytesReceived += value.length;
+          if (contentLength > 0) {
+            const pct = Math.min(100, Math.round((bytesReceived / contentLength) * 100));
+            const mbRec = (bytesReceived / 1024 / 1024).toFixed(1);
+            const mbTot = (contentLength / 1024 / 1024).toFixed(1);
+            setConvertMsg(`Mengunduh berkas: ${pct}% (${mbRec} / ${mbTot} MB)…`);
+          } else {
+            const mb = (bytesReceived / 1024 / 1024).toFixed(2);
+            setConvertMsg(`Mengunduh berkas: ${mb} MB diterima…`);
+          }
+        }
+      }
+
+      if (bytesReceived === 0) throw new Error("Berkas media kosong.");
+
+      const blob = new Blob(chunks as BlobPart[], {
+        type: proxyRes.headers.get("content-type") || "application/octet-stream",
+      });
+
+      const blobUrl = URL.createObjectURL(blob);
+      prevBlobRef.current = blobUrl;
+      setMp3BlobUrl(blobUrl);
+      setMp3Filename(filename);
+      setConvertStatus("done");
+      setConvertMsg(`Berkas "${filename}" berhasil diunduh via proxy.`);
+
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal mengunduh berkas.";
+      setConvertStatus("error");
+      setConvertMsg(msg);
+    }
+  }
+
+  /** Fetch a media URL via proxy then encode to pure MPEG Layer III MP3 client-side */
+  async function handleFetchAsMP3(dl: DownloadLink, title?: string) {
+    if (!dl.url) return;
     resetConvert();
     const filename = safeFilename(title, "mp3");
     setMp3Filename(filename);
 
     try {
       setConvertStatus("fetching");
-      setConvertMsg("Mengambil file dari URL…");
+      setConvertMsg("Mengambil stream media dari server…");
 
       const proxyRes = await fetch("/api/audio/fetch-media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: mediaUrl }),
+        body: JSON.stringify({
+          url: dl.url,
+          token: dl.proxyToken,
+          expiresAt: dl.proxyExpiresAt,
+        }),
       });
 
       if (!proxyRes.ok) {
@@ -165,22 +262,50 @@ export default function MediaPage() {
         throw new Error(err.message ?? "Gagal mengambil media.");
       }
 
-      const blob = await proxyRes.blob();
-      if (blob.size === 0) throw new Error("File media kosong — tidak dapat diproses.");
+      const contentLength = parseInt(
+        proxyRes.headers.get("x-media-size") || proxyRes.headers.get("content-length") || "0",
+        10
+      );
+
+      const reader = proxyRes.body?.getReader();
+      if (!reader) throw new Error("Body tidak dapat dibaca.");
+
+      const chunks: Uint8Array[] = [];
+      let bytesReceived = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          bytesReceived += value.length;
+          if (contentLength > 0) {
+            const pct = Math.min(100, Math.round((bytesReceived / contentLength) * 100));
+            const mbRec = (bytesReceived / 1024 / 1024).toFixed(1);
+            const mbTot = (contentLength / 1024 / 1024).toFixed(1);
+            setConvertMsg(`Mengunduh stream: ${pct}% (${mbRec} / ${mbTot} MB)…`);
+          } else {
+            const mb = (bytesReceived / 1024 / 1024).toFixed(2);
+            setConvertMsg(`Mengunduh stream: ${mb} MB diterima…`);
+          }
+        }
+      }
+
+      if (bytesReceived === 0) throw new Error("File media kosong — tidak dapat diproses.");
 
       setConvertStatus("converting");
-      setConvertMsg("Mengonversi ke MP3…");
+      setConvertMsg("Mendekode audio & mengenkode ke MPEG Layer III (lamejs)…");
 
-      // Decode via Web Audio API
+      const blob = new Blob(chunks as BlobPart[]);
       const arrayBuffer = await blob.arrayBuffer();
       const audioCtx = new AudioContext();
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-      // Encode to MP3 via lamejs (dynamic import — browser only)
+      // Encode to MP3 via lamejs
       const { Mp3Encoder } = await import("@breezystack/lamejs");
       const channels = Math.min(audioBuffer.numberOfChannels, 2) as 1 | 2;
       const sampleRate = audioBuffer.sampleRate;
-      const bitrate = 128;
+      const bitrate = 192;
       const encoder = new Mp3Encoder(channels, sampleRate, bitrate);
 
       const samples = audioBuffer.length;
@@ -209,12 +334,16 @@ export default function MediaPage() {
       if (flushed.length > 0) mp3Chunks.push(new Uint8Array(flushed));
       audioCtx.close();
 
+      if (mp3Chunks.length === 0) {
+        throw new Error("Gagal mengenkode ke format MPEG Layer III.");
+      }
+
       const mp3Blob = new Blob(mp3Chunks as BlobPart[], { type: "audio/mpeg" });
       const blobUrl = URL.createObjectURL(mp3Blob);
       prevBlobRef.current = blobUrl;
       setMp3BlobUrl(blobUrl);
       setConvertStatus("done");
-      setConvertMsg("Konversi selesai — siap diunduh.");
+      setConvertMsg("Konversi ke MPEG Layer III MP3 selesai — siap diunduh.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Konversi gagal.";
       setConvertStatus("error");
@@ -378,25 +507,43 @@ export default function MediaPage() {
 
                 {/* Metadata */}
                 {response.result && (
-                  <div className="space-y-3">
-                    {response.result.title && (
-                      <div>
-                        <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">Judul</p>
-                        <p className="text-[#332F29] font-medium">{response.result.title}</p>
+                  <div className="space-y-4">
+                    {/* Media Card Header with Thumbnail */}
+                    <div className="flex flex-col sm:flex-row gap-4 items-start">
+                      {response.result.thumbnail && (
+                        <div className="w-full sm:w-44 h-28 sm:h-28 rounded-lg overflow-hidden border border-[#D8CCB9] bg-[#F4EBDD] flex-shrink-0 relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={response.result.thumbnail}
+                            alt={response.result.title || "Thumbnail"}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <div className="space-y-2 flex-1 min-w-0">
+                        {response.result.title && (
+                          <div>
+                            <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">Judul</p>
+                            <p className="text-[#332F29] font-medium leading-snug">{response.result.title}</p>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-4 text-xs text-[#62584C]">
+                          {response.result.author && (
+                            <div>
+                              <span className="font-semibold uppercase tracking-wide">Kanal/Kreator: </span>
+                              <span className="text-[#332F29] font-medium">{getAuthorString(response.result.author)}</span>
+                            </div>
+                          )}
+                          {response.result.duration && (
+                            <div>
+                              <span className="font-semibold uppercase tracking-wide">Durasi: </span>
+                              <span className="text-[#332F29] font-medium">{response.result.duration}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    {response.result.author && (
-                      <div>
-                        <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">Penulis / Kanal</p>
-                        <p className="text-[#332F29]">{getAuthorString(response.result.author)}</p>
-                      </div>
-                    )}
-                    {response.result.duration && (
-                      <div>
-                        <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">Durasi</p>
-                        <p className="text-[#332F29]">{response.result.duration}</p>
-                      </div>
-                    )}
+                    </div>
+
                     {response.result.destinationUrl && response.result.destinationUrl !== url && (
                       <div>
                         <p className="text-xs text-[#62584C] uppercase tracking-wide font-semibold mb-0.5">URL Tujuan</p>
@@ -408,6 +555,27 @@ export default function MediaPage() {
                         >
                           {response.result.destinationUrl}
                         </a>
+                      </div>
+                    )}
+
+                    {/* ── Empty state for format filter ── */}
+                    {allLinks.length > 0 && visibleLinks.length === 0 && (
+                      <div className="border border-[#D8CCB9] bg-[#F4EBDD]/50 rounded-lg p-5 text-center space-y-2.5">
+                        <p className="text-sm font-semibold text-[#332F29]">
+                          Format {formatPref.toUpperCase()} belum tersedia pada hasil unduhan saat ini.
+                        </p>
+                        <p className="text-xs text-[#62584C] max-w-md mx-auto">
+                          Hasil sebelumnya di-resolve untuk preferensi format lain. Klik tombol di bawah untuk meminta stream {formatPref.toUpperCase()} secara langsung dari resolver.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => resolveWithFormat(url, formatPref)}
+                          disabled={loading}
+                          className="inline-flex items-center gap-1.5 text-xs bg-[#A34F38] text-white hover:bg-[#8B3F2A] px-4 py-2 rounded font-medium transition-colors disabled:opacity-50"
+                        >
+                          <Download size={13} aria-hidden="true" />
+                          Ambil Format {formatPref.toUpperCase()}
+                        </button>
                       </div>
                     )}
 
@@ -441,46 +609,56 @@ export default function MediaPage() {
                             >
                               <div className="flex flex-col min-w-0">
                                 <span className="font-medium text-[#332F29] text-sm flex items-center gap-1.5">
-                                  {isAudioLink(dl) && <Music size={13} className="text-[#344638]" aria-hidden="true" />}
-                                  {isVideoLink(dl) && <Video size={13} className="text-[#344638]" aria-hidden="true" />}
-                                  {dl.quality ?? dl.type ?? dl.label ?? `Format ${i + 1}`}
+                                  {isAudioLink(dl) && <Music size={14} className="text-[#344638]" aria-hidden="true" />}
+                                  {isVideoLink(dl) && <Video size={14} className="text-[#344638]" aria-hidden="true" />}
+                                  {isAudioLink(dl) ? `Audio (${dl.quality ?? "Direct Stream"})` : isVideoLink(dl) ? `Video (${dl.quality ?? "Direct Stream"})` : (dl.quality ?? dl.type ?? `Format ${i + 1}`)}
                                 </span>
                                 {dl.url && (
-                                  <span className="text-[#62584C] text-xs truncate max-w-[280px]">{dl.url}</span>
+                                  <span className="text-[#62584C] text-xs truncate max-w-[280px] sm:max-w-[340px]">{dl.url}</span>
                                 )}
                               </div>
-                              {dl.url && (
-                                <div className="flex gap-2 shrink-0">
+                              {isValidHttpUrl(dl.url) && (
+                                <div className="flex flex-wrap gap-2 shrink-0 items-center">
                                   <a
                                     href={dl.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     download
                                     className="inline-flex items-center gap-1 text-xs bg-[#344638] text-[#FFFCF6] hover:bg-[#2a3a2c] px-3 py-1.5 rounded font-medium transition-colors"
-                                    aria-label={`Download ${dl.quality ?? dl.type ?? "file"}`}
+                                    aria-label={`Download langsung ${dl.quality ?? dl.type ?? "file"}`}
                                   >
                                     <Download size={12} aria-hidden="true" />
-                                    Download
+                                    Download Langsung
                                   </a>
-                                  {!isAudioLink(dl) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleFetchAsMP3(dl.url!, response.result?.title)}
-                                      disabled={convertStatus === "fetching" || convertStatus === "converting"}
-                                      className="inline-flex items-center gap-1 text-xs border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38]/10 px-3 py-1.5 rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                      aria-label="Ambil audio sebagai MP3"
-                                    >
-                                      <Music size={12} aria-hidden="true" />
-                                      MP3
-                                    </button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadViaProxy(dl, response?.result?.title)}
+                                    disabled={convertStatus === "fetching" || convertStatus === "converting"}
+                                    className="inline-flex items-center gap-1 text-xs border border-[#344638] text-[#344638] hover:bg-[#344638]/10 px-2.5 py-1.5 rounded font-medium transition-colors disabled:opacity-50"
+                                    title="Unduh melalui proxy server TokiConvert untuk memaksakan download berkas"
+                                    aria-label="Download aman via proxy"
+                                  >
+                                    <Download size={11} aria-hidden="true" />
+                                    via Proxy
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFetchAsMP3(dl, response?.result?.title)}
+                                    disabled={convertStatus === "fetching" || convertStatus === "converting"}
+                                    className="inline-flex items-center gap-1 text-xs border border-[#A34F38] text-[#A34F38] hover:bg-[#A34F38]/10 px-2.5 py-1.5 rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Ekstrak atau konversi ke MPEG Layer III (MP3 murni) via lamejs"
+                                    aria-label="Ekstrak ke MP3 Murni di browser"
+                                  >
+                                    <Music size={11} aria-hidden="true" />
+                                    Ekstrak MP3 Murni
+                                  </button>
                                 </div>
                               )}
                             </div>
                           ))}
                         </div>
                         <p className="text-xs text-[#62584C] mt-2 italic">
-                          TokiConvert hanya menampilkan tautan. Pastikan kamu mematuhi syarat penggunaan platform asal.
+                          Tip: Pilih opsi format &quot;MP3&quot; di atas sebelum resolve untuk langsung mendapatkan direct audio stream lebih cepat tanpa perlu re-encode.
                         </p>
                       </div>
                     )}

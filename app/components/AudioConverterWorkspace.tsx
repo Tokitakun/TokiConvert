@@ -171,11 +171,17 @@ export default function AudioConverterWorkspace() {
       return;
     }
 
-    const fetchMediaStream = async (targetUrl: string, fallbackName?: string, originalInputUrl?: string) => {
+    const fetchMediaStream = async (
+      targetUrl: string,
+      fallbackName?: string,
+      originalInputUrl?: string,
+      token?: string,
+      expiresAt?: number
+    ) => {
       const res = await fetch("/api/audio/fetch-media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({ url: targetUrl, token, expiresAt }),
       });
 
       if (!res.ok) {
@@ -225,68 +231,76 @@ export default function AudioConverterWorkspace() {
     setCurrentUrlAction("VALIDASI KEAMANAN & PROTOKOL...");
 
     try {
-      // 1. Direct or platform detection
-      const isKnownDirectMedia = /\.(mp3|wav|ogg|m4a|aac|flac|mp4|webm)(\?.*)?$/i.test(trimmed);
+      setUrlStatusLog((prev) => [...prev, "MENGHUBUNGI RESOLVER MEDIA AMAN..."]);
+      setCurrentUrlAction("RESOLVE METADATA & TOKEN PROXY...");
 
-      if (!isKnownDirectMedia) {
-        // Try platform check via /api/media/resolve first if it matches known social platforms
-        const isPlatform = /(tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|bandcamp\.com|soundcloud\.com|mediafire\.com|pixeldrain\.com|catbox\.moe|drive\.google\.com)/i.test(trimmed);
+      const res = await fetch("/api/media/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmed, format: "mp3" }),
+      });
 
-        if (isPlatform) {
-          setUrlStatusLog((prev) => [...prev, "MENGHUBUNGI RESOLVER PLATFORM RESMI..."]);
-          setCurrentUrlAction("RESOLVE METADATA PLATFORM...");
+      const data = await res.json();
+      if (!res.ok || !data.status) {
+        throw new Error(data.message || "Gagal memperoleh stream audio dari tautan ini.");
+      }
 
-          const res = await fetch("/api/media/resolve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: trimmed }),
-          });
+      // Search for audio/video URL in result
+      let streamUrl = "";
+      let suggestedTitle = "";
+      let token: string | undefined = undefined;
+      let expiresAt: number | undefined = undefined;
 
-          const data = await res.json();
-          if (!res.ok || !data.status) {
-            throw new Error(data.message || "Gagal memperoleh stream audio dari platform ini.");
-          }
+      const r = data.result;
+      if (r && typeof r === "object") {
+        suggestedTitle = r.title || "";
+        const rawDownloads = Array.isArray(r.downloads)
+          ? r.downloads
+          : r.downloads && typeof r.downloads === "object"
+          ? Object.values(r.downloads)
+          : [];
 
-          // Search for audio/video URL in result
-          let streamUrl = "";
-          if (typeof data.result === "string" && data.result.startsWith("http")) {
-            streamUrl = data.result;
-          } else if (data.result && typeof data.result === "object") {
-            const r = data.result;
-            streamUrl =
-              r.audio ||
-              r.audio_url ||
-              r.mp3 ||
-              r.video ||
-              r.url ||
-              r.download_url ||
-              (Array.isArray(r.urls) ? r.urls[0] : "");
-          }
+        if (rawDownloads.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const audioDl = rawDownloads.find((d: any) =>
+            /audio|mp3|m4a|wav/i.test(d?.type || d?.quality || d?.ext || "")
+          ) || rawDownloads[0];
 
-          if (!streamUrl) {
-            throw new Error(
-              "Platform berhasil diakses tetapi tidak ditemukan stream audio langsung yang dapat diproses."
-            );
-          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          streamUrl = (audioDl as any)?.url || "";
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          token = (audioDl as any)?.proxyToken;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expiresAt = (audioDl as any)?.proxyExpiresAt;
+        }
 
-          setUrlStatusLog((prev) => [
-            ...prev,
-            `STREAM AUDIO DITEMUKAN (${data.platform || "Platform"}).`,
-            "MENGUNDUH STREAM SECARA AMAN VIA PROXY...",
-          ]);
-          setCurrentUrlAction("STREAMING MEDIA SECARA AMAN...");
-
-          // Now fetch stream through our secure proxy
-          await fetchMediaStream(streamUrl, `audio_${Date.now()}.mp3`, trimmed);
-          return;
+        if (!streamUrl) {
+          streamUrl = r.audio || r.audio_url || r.mp3 || r.video || r.url || r.download_url || "";
+          token = r.proxyToken;
+          expiresAt = r.proxyExpiresAt;
         }
       }
 
-      // 2. Direct media URL fetch via /api/audio/fetch-media
-      setUrlStatusLog((prev) => [...prev, "SSRF GUARD: VALIDASI ALAMAT IP & HOST..."]);
-      setCurrentUrlAction("MENGUNDUH BERKAS MEDIA DARI SERVER ASAL...");
+      if (!streamUrl) {
+        throw new Error(
+          "Media berhasil diakses tetapi tidak ditemukan stream audio langsung yang dapat diproses."
+        );
+      }
 
-      await fetchMediaStream(trimmed, undefined, trimmed);
+      setUrlStatusLog((prev) => [
+        ...prev,
+        `STREAM AUDIO DITEMUKAN (${data.platform || "Media"}).`,
+        "MENGUNDUH STREAM SECARA AMAN VIA PROXY...",
+      ]);
+      setCurrentUrlAction("STREAMING MEDIA SECARA AMAN...");
+
+      const safeName = suggestedTitle
+        ? `${suggestedTitle.replace(/[^\w\d_.-]/g, "_").slice(0, 50)}.mp3`
+        : `audio_${Date.now()}.mp3`;
+
+      // Fetch stream through our secure proxy with verified HMAC token
+      await fetchMediaStream(streamUrl, safeName, trimmed, token, expiresAt);
+      return;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Gagal memproses URL media.";
       setErrorMessages([msg]);

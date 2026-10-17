@@ -1,15 +1,28 @@
 /**
  * /api/audio/fetch-media - Secure media fetch proxy for direct audio/video URLs.
  * Features:
- * - Strict SSRF guard (rejects private, loopback, link-local, and cloud metadata IPs)
- * - Media type validation (rejects HTML pages and non-media formats)
+ * - Anti-SSRF with Socket DNS Pinning (eliminates TOCTOU / DNS Rebinding)
+ * - Open Proxy Prevention via HMAC-SHA256 Signed URLs or trusted platform CDN allowlist
+ * - Rate Limiting & Concurrent Stream Protection per client IP
+ * - Strict Port & Protocol validation (HTTP/HTTPS, port 80/443 only)
+ * - Media type validation (rejects HTML/XML/JSON pages and non-media formats)
  * - 50 MB maximum stream size limit with chunk byte tracking
  * - 15-second request timeout
- * - No sensitive token or credential leakage in diagnostics
+ * - No sensitive token or credential leakage
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { assertSafeHost } from "@/app/lib/ssrfGuard";
+import { Readable, Transform } from "node:stream";
+import { assertSafeHost, assertSafePort } from "@/app/lib/ssrfGuard";
+import { safePinnedHttpFetch } from "@/app/lib/safeHttp";
+import { verifyProxyUrl } from "@/app/lib/proxySignature";
+import {
+  checkRateLimit,
+  acquireStreamSlot,
+  releaseStreamSlot,
+  getClientIp,
+} from "@/app/lib/rateLimiter";
+import { isAllowedMediaHost } from "@/app/lib/mediaAllowlist";
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 const TIMEOUT_MS = 15_000;
@@ -27,13 +40,37 @@ const ALLOWED_MEDIA_EXTENSIONS = [
   ".wma",
 ];
 
+
+
 function sanitizeFilename(raw: string): string {
   const cleaned = raw.replace(/[^\w\d_.-]/g, "_").slice(0, 80);
   return cleaned || `media_${Date.now()}`;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
-  let body: { url?: string };
+  const clientIp = getClientIp(req.headers);
+
+  // 1. Rate Limiting Check (30 requests per minute per IP)
+  const rateLimit = checkRateLimit(`${clientIp}:fetch_media`, 30, 60);
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      {
+        status: false,
+        message: `Terlalu banyak permintaan. Harap tunggu ${rateLimit.resetSeconds} detik sebelum mencoba lagi.`,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimit.resetSeconds),
+          "X-RateLimit-Limit": String(rateLimit.limit),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  // 2. Parse payload
+  let body: { url?: string; token?: string; expiresAt?: number };
   try {
     body = await req.json();
   } catch {
@@ -68,6 +105,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  // 3. Protocol & Port Validation
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     return NextResponse.json(
       { status: false, message: "Hanya protokol HTTP/HTTPS yang didukung." },
@@ -75,7 +113,31 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // SSRF guard
+  try {
+    assertSafePort(parsed.port);
+  } catch {
+    return NextResponse.json(
+      { status: false, message: "Port tujuan tidak diizinkan. Hanya port standar 80/443 yang didukung." },
+      { status: 400 }
+    );
+  }
+
+  // 4. Open Proxy Prevention: Strictly require valid HMAC signature AND verified media host
+  const isSigned = verifyProxyUrl(rawUrl, body.token, body.expiresAt);
+  const isAllowedHost = isAllowedMediaHost(parsed.hostname);
+
+  if (!isSigned || !isAllowedHost) {
+    return NextResponse.json(
+      {
+        status: false,
+        message:
+          "Akses ditolak: Proxy hanya melayani berkas media yang diverifikasi oleh sistem (Open Proxy Prevention).",
+      },
+      { status: 403 }
+    );
+  }
+
+  // 5. Initial SSRF guard
   try {
     await assertSafeHost(parsed.hostname);
   } catch (err: unknown) {
@@ -96,84 +158,140 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Pre-flight check via HEAD request
-  let reportedLength = 0;
-  let reportedType = "";
+  // 6. Concurrent active download limit (max 3 streams per client IP)
+  const slotAcquired = acquireStreamSlot(clientIp, 3);
+  if (!slotAcquired) {
+    return NextResponse.json(
+      {
+        status: false,
+        message: "Batas unduhan bersamaan tercapai (maks 3 unduhan). Harap tunggu hingga unduhan selesai.",
+      },
+      { status: 429 }
+    );
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  let slotReleased = false;
+  const releaseSlotOnce = () => {
+    if (!slotReleased) {
+      slotReleased = true;
+      releaseStreamSlot(clientIp);
+      clearTimeout(timeoutId);
+    }
+  };
+
   try {
-    let headRes: Response | null = null;
+    let finalTargetUrl = parsed;
+    let reportedType = "";
+    let reportedLength = 0;
+
+    // Pre-flight check via HEAD using pinned safe fetch
     try {
-      headRes = await fetch(parsed.toString(), {
+      const headOutcome = await safePinnedHttpFetch(parsed, {
         method: "HEAD",
-        signal: controller.signal,
         headers: {
           "User-Agent": "TokiConvert/1.0 (Media Processor; +https://tokiconvert.app)",
         },
+        signal: controller.signal,
+        timeoutMs: TIMEOUT_MS,
       });
-    } catch {
-      // Some servers reject HEAD requests; fallback directly to GET
-    }
 
-    if (headRes && headRes.ok) {
-      reportedType = (headRes.headers.get("content-type") || "").toLowerCase();
-      reportedLength = parseInt(headRes.headers.get("content-length") || "0", 10);
+      finalTargetUrl = headOutcome.finalUrl;
+      const headStatus = headOutcome.statusCode;
+      const headHeaders = headOutcome.headers;
+      headOutcome.body.resume(); // consume/close HEAD stream
 
-      // Reject HTML web pages
-      if (reportedType.includes("text/html") || reportedType.includes("application/xhtml")) {
-        clearTimeout(timeoutId);
+      if (headStatus >= 200 && headStatus < 300) {
+        reportedType = String(headHeaders["content-type"] || "").toLowerCase();
+        reportedLength = parseInt(String(headHeaders["content-length"] || "0"), 10);
+
+        if (
+          reportedType.includes("text/html") ||
+          reportedType.includes("application/xhtml") ||
+          reportedType.includes("application/json") ||
+          reportedType.includes("text/xml")
+        ) {
+          releaseSlotOnce();
+          return NextResponse.json(
+            {
+              status: false,
+              message: "URL ini mengarah ke halaman web atau data teks, bukan file media langsung.",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (reportedLength > MAX_BYTES) {
+          releaseSlotOnce();
+          return NextResponse.json(
+            {
+              status: false,
+              message: `Ukuran file melebihi batas 50 MB (${(reportedLength / (1024 * 1024)).toFixed(1)} MB).`,
+            },
+            { status: 413 }
+          );
+        }
+      }
+    } catch (headErr: unknown) {
+      const msg = headErr instanceof Error ? headErr.message : "";
+      if (
+        msg === "SSRF_BLOCKED" ||
+        msg === "TOO_MANY_REDIRECTS" ||
+        msg === "INVALID_PROTOCOL" ||
+        msg === "REDIRECT_NO_LOCATION" ||
+        msg === "INVALID_PORT"
+      ) {
+        releaseSlotOnce();
+        if (msg === "SSRF_BLOCKED") {
+          return NextResponse.json(
+            {
+              status: false,
+              message:
+                "Akses ditolak: Alamat tujuan mengarah ke jaringan lokal atau privat (SSRF Guard).",
+            },
+            { status: 403 }
+          );
+        }
         return NextResponse.json(
-          {
-            status: false,
-            message:
-              "URL ini mengarah ke halaman web (HTML), bukan file media langsung. Harap masukkan tautan file media audio/video langsung atau gunakan resolver platform.",
-          },
+          { status: false, message: "URL tidak valid atau memiliki pengalihan (redirect) berlebih." },
           { status: 400 }
         );
       }
-
-      if (reportedLength > MAX_BYTES) {
-        clearTimeout(timeoutId);
-        return NextResponse.json(
-          {
-            status: false,
-            message: `Ukuran file melebihi batas 50 MB (${(reportedLength / (1024 * 1024)).toFixed(1)} MB).`,
-          },
-          { status: 413 }
-        );
-      }
+      // Fallback to GET on non-security HEAD errors (e.g. 405 Method Not Allowed)
     }
 
-    // Fetch the media stream with GET
-    const getRes = await fetch(parsed.toString(), {
+    // Fetch the media stream with GET using pinned safe fetch
+    const getOutcome = await safePinnedHttpFetch(finalTargetUrl, {
       method: "GET",
-      signal: controller.signal,
       headers: {
         "User-Agent": "TokiConvert/1.0 (Media Processor; +https://tokiconvert.app)",
       },
+      signal: controller.signal,
+      timeoutMs: TIMEOUT_MS,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!getRes.ok) {
+    if (getOutcome.statusCode < 200 || getOutcome.statusCode >= 300) {
+      getOutcome.body.resume();
+      releaseSlotOnce();
       return NextResponse.json(
         {
           status: false,
-          message: `Server asal menolak permintaan dengan status ${getRes.status} (${getRes.statusText}).`,
+          message: `Server asal menolak permintaan dengan status ${getOutcome.statusCode} (${getOutcome.statusMessage}).`,
         },
         { status: 502 }
       );
     }
 
-    const contentType = (
-      getRes.headers.get("content-type") ||
-      reportedType ||
-      "application/octet-stream"
+    const contentType = String(
+      getOutcome.headers["content-type"] || reportedType || "application/octet-stream"
     ).toLowerCase();
 
     // Check again for HTML in GET response
     if (contentType.includes("text/html") || contentType.includes("application/xhtml")) {
+      getOutcome.body.resume();
+      releaseSlotOnce();
       return NextResponse.json(
         {
           status: false,
@@ -192,6 +310,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     const isMediaExt = ALLOWED_MEDIA_EXTENSIONS.includes(pathExt);
 
     if (!isMediaMime && !isMediaExt) {
+      getOutcome.body.resume();
+      releaseSlotOnce();
       return NextResponse.json(
         {
           status: false,
@@ -201,8 +321,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       );
     }
 
-    const contentLength = parseInt(getRes.headers.get("content-length") || "0", 10);
+    const contentLength = parseInt(String(getOutcome.headers["content-length"] || "0"), 10);
     if (contentLength > MAX_BYTES) {
+      getOutcome.body.resume();
+      releaseSlotOnce();
       return NextResponse.json(
         {
           status: false,
@@ -214,7 +336,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     // Determine filename
     let filename = "";
-    const disposition = getRes.headers.get("content-disposition");
+    const disposition = String(getOutcome.headers["content-disposition"] || "");
     if (disposition && disposition.includes("filename=")) {
       const match = disposition.match(/filename=["']?([^"';]+)["']?/);
       if (match && match[1]) filename = match[1];
@@ -225,41 +347,49 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
     filename = sanitizeFilename(filename);
 
-    // Stream with byte counter to prevent memory flooding
-    if (!getRes.body) {
-      return NextResponse.json(
-        { status: false, message: "Response body kosong dari server asal." },
-        { status: 502 }
-      );
-    }
-
+    // Enforce byte limit via Transform stream
     let bytesReceived = 0;
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
+    const limiterStream = new Transform({
+      transform(chunk, _encoding, callback) {
         bytesReceived += chunk.length;
         if (bytesReceived > MAX_BYTES) {
-          controller.error(new Error("PAYLOAD_TOO_LARGE"));
+          releaseSlotOnce();
+          callback(new Error("PAYLOAD_TOO_LARGE"));
           return;
         }
-        controller.enqueue(chunk);
+        callback(null, chunk);
+      },
+      final(callback) {
+        releaseSlotOnce();
+        callback();
       },
     });
 
-    const responseStream = getRes.body.pipeThrough(transformStream);
+    const webStream = Readable.toWeb(getOutcome.body.pipe(limiterStream)) as unknown as BodyInit;
 
-    return new Response(responseStream, {
+    return new Response(webStream, {
       status: 200,
       headers: {
         "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${filename}"`,
         "X-Media-Filename": filename,
         "X-Media-Size": String(contentLength || bytesReceived),
         "Cache-Control": "no-store",
       },
     });
   } catch (err: unknown) {
-    clearTimeout(timeoutId);
+    releaseSlotOnce();
     const msg = err instanceof Error ? err.message : "";
-    if (msg.includes("aborted") || msg.includes("TIMEOUT")) {
+    if (msg.includes("SSRF_BLOCKED")) {
+      return NextResponse.json(
+        {
+          status: false,
+          message: "Akses ditolak: Alamat tujuan mengarah ke jaringan lokal atau privat (SSRF Guard).",
+        },
+        { status: 403 }
+      );
+    }
+    if (msg.includes("aborted") || msg.includes("ABORTED") || msg.includes("TIMEOUT")) {
       return NextResponse.json(
         { status: false, message: "Waktu permintaan unduhan media habis (timeout 15 detik)." },
         { status: 504 }
